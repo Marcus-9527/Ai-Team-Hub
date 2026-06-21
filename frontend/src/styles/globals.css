@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+  --bg-primary: #0B0B10;
+  --bg-secondary: #12121A;
+  --bg-card: rgba(255, 255, 255, 0.03);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-glow: rgba(109, 40, 255, 0.3);
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-muted: rgba(255, 255, 255, 0.35);
+  --accent: #6D28FF;
+  --accent-light: #8B5CF6;
+  --accent-glow: rgba(109, 40, 255, 0.15);
+  --accent-glow-strong: rgba(109, 40, 255, 0.4);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: auto;
+}
+
+body {
+  font-family: 'Neue Haas Grotesk', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Selection */
+::selection {
+  background: #fc1c46;
+  color: white;
+}

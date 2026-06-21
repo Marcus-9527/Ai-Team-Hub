@@ -1,0 +1,20 @@
+name = "ai-team-hub"
+main = "worker/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-team-hub-db"
+database_id = "8fbb6115-b81e-40d2-b2cc-82654e6db926"
+
+# Environment variables
+[vars]
+WORKER_ENV = "production"
+
+# Routes
+routes = [
+  { pattern = "/*", zone_name = "" }
+]

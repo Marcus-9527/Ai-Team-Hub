@@ -1,0 +1,19 @@
+{
+  "name": "ai-team-hub",
+  "version": "2.1.0",
+  "description": "TypeScript SDK for AI Team Hub — Multi-Agent AI Runtime",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": ["ai", "multi-agent", "sdk", "runtime"],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

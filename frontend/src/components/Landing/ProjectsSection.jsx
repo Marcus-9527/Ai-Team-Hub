@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../../i18n';
 
 const PROJECTS = [
   { id: 'code-review', category: 'ENGINEERING', title: 'Code Review', desc: 'Multi-AI peer review with architecture analysis', image: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=1920&q=80' },
@@ -7,6 +8,7 @@ const PROJECTS = [
 ];
 
 export default function ProjectsSection() {
+  const t = useTranslation();
   const [hoveredIndex, setHoveredIndex] = useState(null);
   const [ready, setReady] = useState(false);
   const sectionRef = useRef(null);
@@ -30,25 +32,25 @@ export default function ProjectsSection() {
         {/* Overline */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '40px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(16px)', transition: `all 0.8s ${ease} 0.1s` }}>
           <span style={{ display: 'inline-block', width: '40px', height: '2px', background: '#fc1c46' }} />
-          <span className="tl-caption" style={{ color: '#fc1c46' }}>What We Do</span>
+          <span className="tl-caption" style={{ color: '#fc1c46' }}>{t('landing.projects.overline')}</span>
         </div>
 
         {/* Title line 1 */}
         <div style={{ overflow: 'hidden', marginBottom: '8px' }}>
           <h2 className="tl-section-title" style={{ maxWidth: '800px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.25s` }}>
-            AI teammates
+            {t('landing.projects.title1')}
           </h2>
         </div>
         {/* Title line 2 */}
         <div style={{ overflow: 'hidden', marginBottom: '8px' }}>
           <h2 className="tl-section-title" style={{ maxWidth: '800px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.4s` }}>
-            for every role
+            {t('landing.projects.title2')}
           </h2>
         </div>
         {/* Title line 3 */}
         <div style={{ overflow: 'hidden' }}>
           <h2 className="tl-section-title" style={{ maxWidth: '800px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.55s` }}>
-            in your workflow
+            {t('landing.projects.title3')}
           </h2>
         </div>
       </div>

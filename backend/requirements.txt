@@ -1,4 +1,10 @@
 fastapi==0.115.6
+# fastapi 0.115.x 仅兼容 starlette <0.43；未锁版本时 pip 会装到不兼容的 1.x，
+# 导致 APIRouter.__init__ 报 "unexpected keyword argument 'on_startup'"，整站无法启动。
+starlette==0.41.3
+# sse-starlette 3.x 要求 starlette>=0.49.1，与上面的 starlette 0.41.3 冲突，
+# 故固定到兼容 0.41 的 2.x。
+sse-starlette==2.4.1
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
@@ -6,5 +12,9 @@ python-dotenv==1.1.0
 httpx==0.28.1
 socksio>=1.0
 python-multipart>=0.0.9
+cryptography==44.0.0
 pydantic==2.10.4
 websockets==14.1
+python-docx>=1.1.2
+python-pptx>=1.0.2
+pypdf>=5.0.0

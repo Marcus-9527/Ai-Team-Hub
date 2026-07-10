@@ -1,17 +1,19 @@
 import { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { useTranslation } from '../../i18n';
 
 gsap.registerPlugin(ScrollTrigger);
 
 const CAPS = [
-  { num: '1', title: 'Custom AI Teammates', desc: 'Create AI agents with unique personalities, expertise areas, and system prompts. From senior engineers to creative strategists.' },
-  { num: '2', title: 'Channel-Based Collaboration', desc: 'Organize work into channels. Add multiple teammates to a channel and let them collaborate on complex problems.' },
-  { num: '3', title: 'Multi-Model Support', desc: 'Use different LLMs for each teammate — GPT-4, Claude, Gemini, or any OpenAI-compatible API. Right model, right role.' },
-  { num: '4', title: 'Real-Time Conversation', desc: 'Watch teammates respond in real time, build on each other\'s insights, and debate different approaches to your problems.' },
+  { num: '1', titleKey: 'landing.capabilities.1.title', descKey: 'landing.capabilities.1.desc' },
+  { num: '2', titleKey: 'landing.capabilities.2.title', descKey: 'landing.capabilities.2.desc' },
+  { num: '3', titleKey: 'landing.capabilities.3.title', descKey: 'landing.capabilities.3.desc' },
+  { num: '4', titleKey: 'landing.capabilities.4.title', descKey: 'landing.capabilities.4.desc' },
 ];
 
 export default function CapabilitiesSection() {
+  const t = useTranslation();
   const sectionRef = useRef(null);
   const labelRef = useRef(null);
   const colsRef = useRef([]);
@@ -61,7 +63,7 @@ export default function CapabilitiesSection() {
             <path d="M3 8h10m0 0l-3-3m3 3l-3 3" stroke="#fc1c46" strokeWidth="1.5" strokeLinecap="square" />
           </svg>
           <span style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fc1c46', fontWeight: 500 }}>
-            Capabilities
+            {t('landing.capabilities.overline')}
           </span>
         </div>
 
@@ -75,11 +77,11 @@ export default function CapabilitiesSection() {
               </div>
               <h3 ref={el => titlesRef.current[i] = el}
                 style={{ fontSize: 'clamp(15px, 1.2vw, 20px)', fontWeight: 600, lineHeight: 1.3, marginBottom: '8px', color: '#fff', letterSpacing: '-0.01em' }}>
-                {cap.title}
+                {t(cap.titleKey)}
               </h3>
               <p ref={el => descsRef.current[i] = el}
                 style={{ fontSize: '13px', lineHeight: 1.75, color: 'rgba(255,255,255,0.35)', fontWeight: 400 }}>
-                {cap.desc}
+                {t(cap.descKey)}
               </p>
             </div>
           ))}

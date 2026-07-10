@@ -1,9 +1,7 @@
 """
-memory_namespaces.py — STUB MODULE - NO RUNTIME EFFECT
+memory_namespaces.py — Per-teammate memory namespaces.
 
-⚠️ STUB — This module has no active runtime consumers.
-    It is not imported by any execution path in the current system.
-    Do not extend; memory features are not wired into the FSM pipeline.
+Used by the memory layer to scope memory entries per teammate.
 """
 
 import logging
@@ -13,10 +11,10 @@ logger = logging.getLogger("memory_namespaces")
 
 
 class MemoryNamespace:
-    """Per-agent memory namespace."""
+    """Per-teammate memory namespace."""
 
-    def __init__(self, agent_id: str):
-        self.agent_id = agent_id
+    def __init__(self, teammate_id: str):
+        self.teammate_id = teammate_id
 
     def write_history(self, role: str, content: str) -> None:
         pass
@@ -28,7 +26,7 @@ class MemoryNamespace:
 _namespaces: dict[str, MemoryNamespace] = {}
 
 
-def get_namespace(agent_id: str) -> MemoryNamespace:
-    if agent_id not in _namespaces:
-        _namespaces[agent_id] = MemoryNamespace(agent_id)
-    return _namespaces[agent_id]
+def get_namespace(teammate_id: str) -> MemoryNamespace:
+    if teammate_id not in _namespaces:
+        _namespaces[teammate_id] = MemoryNamespace(teammate_id)
+    return _namespaces[teammate_id]

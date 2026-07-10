@@ -2,12 +2,12 @@
 runtime/context_isolation.py — Context Isolation Layer (Anti-Leak)
 
 Ensures:
-  - No agent receives global runtime state
+  - No teammate receives global runtime state
   - Only minimal required input is passed
-  - No cross-agent memory leakage
-  - Input is frozen (immutable snapshot) before passing to agent
+  - No cross-teammate memory leakage
+  - Input is frozen (immutable snapshot) before passing to teammate
 
-Each agent gets exactly the fields it needs, nothing more.
+Each teammate gets exactly the fields it needs, nothing more.
 """
 
 import copy
@@ -21,10 +21,10 @@ logger = logging.getLogger("runtime.context_isolation")
 
 # ── Agent Input Contracts ──
 
-# Each agent declares exactly which input fields it needs.
+# Each teammate declares exactly which input fields it needs.
 # The isolation layer strips everything else.
 
-AGENT_INPUT_CONTRACTS: dict[str, list[str]] = {
+TEAMMATE_INPUT_CONTRACTS: dict[str, list[str]] = {
     "planner": ["task"],
     "executor": ["plan", "original_task"],
     "reviewer": ["result", "original_task"],
@@ -36,10 +36,10 @@ AGENT_INPUT_CONTRACTS: dict[str, list[str]] = {
 @dataclass(frozen=True)
 class IsolatedContext:
     """
-    Immutable, minimal context passed to an agent.
+    Immutable, minimal context passed to a teammate.
     Frozen dataclass — cannot be modified after creation.
     """
-    agent_id: str
+    teammate_id: str
     state: str
     data: tuple  # frozen dict as tuple of items
 
@@ -54,12 +54,12 @@ class IsolatedContext:
 
 class ContextIsolation:
     """
-    Strips global state and passes only minimal required input to agents.
+    Strips global state and passes only minimal required input to teammates.
 
     Usage:
         isolation = ContextIsolation()
         isolated = isolation.isolate(
-            agent_id="planner",
+            teammate_id="strategy",
             state="PLAN",
             global_context={"task": "...", "api_key": "...", "retry_count": 2, ...},
         )
@@ -68,56 +68,56 @@ class ContextIsolation:
 
     def isolate(
         self,
-        agent_id: str,
+        teammate_id: str,
         state: str,
         global_context: dict,
     ) -> IsolatedContext:
         """
-        Create isolated context for an agent.
+        Create isolated context for a teammate.
 
-        1. Look up the agent's input contract
+        1. Look up the teammate's input contract
         2. Extract only the declared fields
         3. Deep-copy to prevent mutation
         4. Return frozen IsolatedContext
         """
-        contract = AGENT_INPUT_CONTRACTS.get(agent_id, [])
+        contract = TEAMMATE_INPUT_CONTRACTS.get(teammate_id, [])
         if not contract:
-            logger.warning(f"[ISOLATION] No contract for agent '{agent_id}', passing empty context")
-            return IsolatedContext(agent_id=agent_id, state=state, data=())
+            logger.warning(f"[ISOLATION] No contract for teammate '{teammate_id}', passing empty context")
+            return IsolatedContext(teammate_id=teammate_id, state=state, data=())
 
         isolated_data = {}
         for key in contract:
             if key in global_context:
-                # Deep copy to prevent agent from mutating global state
+                # Deep copy to prevent teammate from mutating global state
                 isolated_data[key] = copy.deepcopy(global_context[key])
             else:
-                logger.warning(f"[ISOLATION] Required field '{key}' missing for agent '{agent_id}'")
+                logger.warning(f"[ISOLATION] Required field '{key}' missing for teammate '{teammate_id}'")
 
         # Log what was stripped
         stripped_keys = set(global_context.keys()) - set(contract) - {"api_key", "password", "secret", "token"}
         if stripped_keys:
-            logger.debug(f"[ISOLATION] Stripped keys for {agent_id}: {stripped_keys}")
+            logger.debug(f"[ISOLATION] Stripped keys for {teammate_id}: {stripped_keys}")
 
         # Freeze as tuple of items (immutable)
         frozen_data = tuple(sorted(isolated_data.items()))
 
         return IsolatedContext(
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             state=state,
             data=frozen_data,
         )
 
-    def validate_no_leak(self, agent_output: Any, agent_id: str) -> bool:
+    def validate_no_leak(self, teammate_output: Any, teammate_id: str) -> bool:
         """
-        Validate that agent output doesn't contain leaked global state.
+        Validate that teammate output doesn't contain leaked global state.
         Checks for sensitive keys in output.
         """
         sensitive_keys = {"api_key", "password", "secret", "token", "authorization", "base_url"}
 
-        output_str = str(agent_output).lower()
+        output_str = str(teammate_output).lower()
         for key in sensitive_keys:
             if key in output_str:
-                logger.error(f"[ISOLATION] Potential leak: agent '{agent_id}' output contains '{key}'")
+                logger.error(f"[ISOLATION] Potential leak: teammate '{teammate_id}' output contains '{key}'")
                 return False
         return True
 

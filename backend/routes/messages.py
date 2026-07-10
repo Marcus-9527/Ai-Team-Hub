@@ -4,7 +4,7 @@ Message & chat routes — streaming AI response with separated cache/memory arch
 Architecture:
   CACHE LAYER (static)  → cache_key.py + cache_prefix_builder.py
   DYNAMIC LAYER         → context_builder.py
-  MEMORY ENGINE         → memory_store.py + memory_retriever.py + memory_summarizer.py
+  MEMORY ENGINE         → memory (intelligence layer) + memory_summarizer
   LLM RUNTIME           → ai_service.py (stream_ai_response + warmup_cache)
 
 Flow:
@@ -14,10 +14,14 @@ Flow:
   4. stream_ai_response(system_prompt, messages) → LLM call
   5. process_conversation_turn() → memory write-back
 """
+import asyncio
 import json
 import logging
 import os
 import uuid
+import base64
+import mimetypes
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -26,9 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db, async_session
 from backend.models import Message, Channel, Teammate, APIKey
-from backend.services.ai_service import stream_ai_response, warmup_cache
+from backend.services.ai_service import stream_ai_response
 from backend.services.cache_prefix_builder import build_fixed_prefix, extract_recent_turns
-from backend.services.memory_summarizer import process_conversation_turn, SUMMARY_INTERVAL
 from backend.services.cache_warmup_service import is_warmed_up, mark_warmed_up
 from backend.cache import message_cache, teammate_cache, apikey_cache
 
@@ -40,6 +43,172 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "upload
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 WARMUP_ENABLED = True
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_TEXT_EXTRACT_SIZE = 8000  # 文本文件最大提取字符数
+
+TEXT_EXTENSIONS = {
+    '.txt', '.md', '.py', '.js', '.ts', '.jsx', '.tsx', '.json', '.yaml', '.yml',
+    '.html', '.htm', '.css', '.scss', '.less', '.xml', '.csv', '.log', '.sh',
+    '.bash', '.zsh', '.sql', '.toml', '.ini', '.cfg', '.conf', '.env', '.rst',
+    '.go', '.rs', '.java', '.kt', '.scala', '.c', '.cpp', '.h', '.hpp', '.swift',
+    '.rb', '.php', '.pl', '.lua', '.r', '.m', '.mm', '.dockerfile', '.gitignore',
+    '.vue', '.svelte', '.astro', '.php',
+}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+OFFICE_EXTENSIONS = {'.docx', '.pptx', '.pdf'}
+
+
+def _process_file_for_llm(filename: str, content_bytes: bytes) -> tuple[str, Any]:
+    """
+    处理文件内容，准备可供 LLM 读取的形式。
+
+    Returns:
+        (text_content, message_content) —
+        - text_content: 用于存入 DB content 字段的显示文本
+        - message_content: 用于注入到 LLM message 的 content 格式
+          文本文件 → str
+          图片文件 → list of content blocks (OpenAI vision 格式)
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+
+    # 文本类：直接 decode
+    if ext in TEXT_EXTENSIONS:
+        try:
+            text = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = content_bytes.decode("latin-1")
+            except Exception as e:
+                logger.warning(f"Failed to decode file content: {e}")
+                text = f"[Binary file: {filename}]"
+                return text, text
+
+        if len(text) > MAX_TEXT_EXTRACT_SIZE:
+            text = text[:MAX_TEXT_EXTRACT_SIZE] + f"\n... [truncated, total {len(text)} chars]"
+
+        llm_content = f"[File: {filename}]\n{text}" if text.strip() else f"[File: {filename}] (empty)"
+        return llm_content, llm_content
+
+    # Office 文档类：专用解析器提取文本
+    if ext in OFFICE_EXTENSIONS:
+        from backend.services.attachment_service import _extract_office_text
+        text = _extract_office_text(content_bytes, ext)
+        if text:
+            if len(text) > MAX_TEXT_EXTRACT_SIZE:
+                text = text[:MAX_TEXT_EXTRACT_SIZE] + f"\n... [truncated, total {len(text)} chars]"
+            llm_content = f"[File: {filename}]\n{text}" if text.strip() else f"[File: {filename}] (empty)"
+            return llm_content, llm_content
+        # Fall through to binary handling on failure
+
+    # 图片类：base64 data URI (vision 格式)
+    if ext in IMAGE_EXTENSIONS or (len(content_bytes) > 0 and _is_image_bytes(content_bytes)):
+        mime = mimetypes.guess_type(filename)[0] or "image/png"
+        b64 = base64.b64encode(content_bytes).decode("ascii")
+        data_uri = f"data:{mime};base64,{b64}"
+        # OpenAI-compatible vision content block
+        llm_content = [
+            {"type": "text", "text": f"[Image: {filename}]"},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ]
+        return f"[Image: {filename}]", llm_content
+
+    # 其他二进制：尝试 utf-8 decode（可能漏掉的文本）
+    try:
+        text = content_bytes.decode("utf-8")
+        if len(text) > MAX_TEXT_EXTRACT_SIZE:
+            text = text[:MAX_TEXT_EXTRACT_SIZE] + f"\n... [truncated, total {len(text)} chars]"
+        llm_content = f"[File: {filename}]\n{text}"
+        return llm_content, llm_content
+    except UnicodeDecodeError:
+        pass
+
+    # 纯二进制
+    size = len(content_bytes)
+    return f"[Binary file: {filename} ({_format_size(size)})]", f"[Binary file: {filename} ({_format_size(size)}), content not readable]"
+
+
+def _is_image_bytes(data: bytes) -> bool:
+    """Check magic bytes for common image formats."""
+    if len(data) < 8:
+        return False
+    if data[:4] == b'\x89PNG':
+        return True
+    if data[:2] == b'\xff\xd8':
+        return True
+    if data[:4] == b'GIF8' and data[4:6] in (b'87a', b'89a'):
+        return True
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return True
+    return False
+
+
+def _format_size(n: int) -> str:
+    if n < 1024:
+        return f"{n}B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n / (1024 * 1024):.1f}MB"
+
+
+def _extract_text_from_history_message(msg) -> str:
+    """
+    从历史消息中提取文本内容。
+    如果消息 content 是 list (vision 格式)，提取文本部分，忽略 image blocks。
+    """
+    content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+    if isinstance(content, list):
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+        return "\n".join(texts)
+    return str(content or "")
+
+
+def _inject_attachment_content(messages: list) -> list:
+    """
+    将历史消息中 attachments 的 llm_content 注入到 message content。
+    这样 build_fixed_prefix 构建的 prompt 就能包含文件内容。
+
+    处理逻辑：
+    - 文本文件：llm_content 是 str，直接替换 content（保留原始文本摘要）
+    - 图片文件：llm_content 是 list (vision blocks)，把 content 转为 vision 格式
+    """
+    result = []
+    for m in messages:
+        if isinstance(m, dict):
+            content = m.get("content", "")
+            attachments = m.get("attachments") or []
+        else:
+            content = getattr(m, "content", "")
+            attachments = getattr(m, "attachments", None) or []
+
+        if attachments:
+            # Take the first attachment's llm_content
+            att = attachments[0]
+            llm_content = att.get("llm_content")
+            if llm_content and isinstance(llm_content, list):
+                # Vision format: convert content to multimodal blocks
+                text_content = str(content) if content else ""
+                content = [
+                    {"type": "text", "text": text_content},
+                    *llm_content,
+                ]
+            elif llm_content and isinstance(llm_content, str):
+                # Text file: llm_content already contains "[File: xxx]\n<content>"
+                content = llm_content
+
+        if isinstance(m, dict):
+            m = dict(m)
+            m["content"] = content
+            result.append(m)
+        else:
+            # Create a dict representation for the LLM pipeline
+            result.append({
+                "role": getattr(m, "role", "user"),
+                "content": content,
+            })
+    return result
 
 
 @router.get("/{channel_id}")
@@ -60,6 +229,7 @@ async def list_messages(channel_id: str, limit: int = 200, db: AsyncSession = De
         {
             "id": m.id, "channel_id": m.channel_id, "role": m.role,
             "author_name": m.author_name, "author_id": m.author_id,
+            "avatar_emoji": m.avatar_emoji or "🤖",
             "content": m.content, "attachments": m.attachments or [],
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
@@ -101,6 +271,10 @@ async def send_system_message(channel_id: str, data: dict, db: AsyncSession = De
 @router.post("/{channel_id}/file")
 async def upload_file(channel_id: str, file: UploadFile = File(...),
                       author_name: str = Form("You"), db: AsyncSession = Depends(get_db)):
+    return await _do_upload_file(channel_id, file, author_name, db)
+
+
+async def _do_upload_file(channel_id: str, file: UploadFile, author_name: str, db: AsyncSession):
     ch_result = await db.execute(select(Channel).where(Channel.id == channel_id))
     if not ch_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -112,12 +286,31 @@ async def upload_file(channel_id: str, file: UploadFile = File(...),
     with open(file_path, "wb") as f:
         f.write(content_bytes)
 
+    # Process file content so LLM can read it
+    display_text, llm_content = _process_file_for_llm(file.filename or "file", content_bytes)
+    is_vision = isinstance(llm_content, list)
+
+    # ── Generate Shared AttachmentContext (async, single parse → DB cache) ──
+    from backend.services.attachment_context import _db_save_context, parse_file_context, compute_content_hash
+
+    file_id = str(uuid.uuid4())
+    content_hash = compute_content_hash(content_bytes)
+    ctx = parse_file_context(file_id, file.filename or "file", content_bytes)
+
+    # Persist to DB (fire-and-forget style — INSERT OR IGNORE)
+    await _db_save_context(ctx)
+
     msg = Message(
         channel_id=channel_id, role="user", author_name=author_name,
-        content=f"[Uploaded: {file.filename}]",
+        content=display_text,
         attachments=[{
             "filename": file.filename or "file", "saved_as": safe_name,
             "size": len(content_bytes), "mime": file.content_type or "application/octet-stream",
+            "llm_content": llm_content,
+            "is_vision": is_vision,
+            "context_version_key": ctx.version_key,
+            "context_summary": ctx.summary,
+            "context_dict": ctx.to_dict(),  # inline cache — avoids DB lookup on send
         }],
     )
     db.add(msg)
@@ -134,9 +327,57 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         raise HTTPException(status_code=404, detail="Channel not found")
 
     content = data.get("content", "")
-    teammate_id = data.get("teammate_id")
+    teammate_ids_raw = data.get("teammate_ids")
     attachments = data.get("attachments")
     skip_user_save = data.get("skip_user_save", False)
+
+    # ── Load shared AttachmentContext (from uploaded file) ──
+    shared_attachment_context = None
+    if attachments:
+        # Try inline cache first (avoids DB round-trip)
+        for att in attachments:
+            ctx_dict = att.get("context_dict")
+            if ctx_dict:
+                shared_attachment_context = ctx_dict
+                break
+
+        # Fallback to DB lookup if inline not present
+        if not shared_attachment_context:
+            from backend.services.attachment_context import _db_find_context_by_file_id
+            for att in attachments:
+                version_key = att.get("context_version_key")
+                if version_key:
+                    parts = version_key.split(":")
+                    if len(parts) == 2:
+                        ctx = await _db_find_context_by_file_id(parts[0], parts[1])
+                        if ctx:
+                            shared_attachment_context = ctx.to_dict()
+                            break
+
+    # If attachments contain llm_content, inject into content for LLM visibility
+    if attachments:
+        att_text_parts = []
+        att_vision_blocks = []
+        for att in attachments:
+            llm_c = att.get("llm_content")
+            if llm_c and isinstance(llm_c, str):
+                att_text_parts.append(llm_c)
+            elif llm_c and isinstance(llm_c, list):
+                # Vision blocks — extract text parts and collect image blocks
+                for block in llm_c:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            att_text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "image_url":
+                            att_vision_blocks.append(block)
+        if att_text_parts:
+            content = (content + "\n\n" + "\n".join(att_text_parts)).strip()
+        # If there are vision blocks, convert content to multimodal format
+        if att_vision_blocks:
+            content = json.dumps([
+                {"type": "text", "text": content},
+                *att_vision_blocks,
+            ])
 
     # Save user message
     user_msg_id = None
@@ -149,154 +390,200 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         user_msg_id = user_msg.id
         message_cache.invalidate(channel_id)
 
-    if not teammate_id:
-        return {"user_message_id": user_msg_id}
+    # ── Team Collaboration: all teammates respond ──
+    from backend.services.team_collaboration import generate_team_response
+    from backend.models import Channel as ChannelModel
 
-    # ── Load teammate (cache-first) ──
-    teammate = teammate_cache.get(teammate_id)
-    if teammate is not None:
-        tm_system_prompt = teammate["system_prompt"]
-        tm_model_provider = teammate["model_provider"]
-        tm_model_name = teammate["model_name"]
-        tm_api_key_ref = teammate["api_key_ref"]
-        tm_name = teammate["name"]
+    # Get all teammates in this channel
+    channel_data = teammate_cache.get(f"channel_teammates:{channel_id}")
+    if channel_data is None:
+        ch_result = await db.execute(select(ChannelModel).where(ChannelModel.id == channel_id))
+        ch_obj = ch_result.scalar_one_or_none()
+        if ch_obj:
+            tm_ids = ch_obj.teammate_ids or []
+            channel_data = list(tm_ids) if tm_ids else []
+            teammate_cache.set(f"channel_teammates:{channel_id}", channel_data)
+        else:
+            channel_data = []
+
+    # Normalize teammate_ids: string → single-element list, list → as-is, None → all
+    teammate_ids = teammate_ids_raw
+    if isinstance(teammate_ids, str):
+        teammate_ids = [teammate_ids]
+    if not isinstance(teammate_ids, list):
+        teammate_ids = None
+
+    # Helper to load a teammate dict from cache or DB
+    async def _load_teammate(tm_id: str) -> dict | None:
+        tm = teammate_cache.get(tm_id)
+        if tm is not None:
+            return tm
+        tm_result = await db.execute(select(Teammate).where(Teammate.id == tm_id))
+        tm_obj = tm_result.scalar_one_or_none()
+        if not tm_obj:
+            return None
+        tm = {
+            "id": tm_obj.id, "name": tm_obj.name, "role": tm_obj.role,
+            "avatar_emoji": tm_obj.avatar_emoji, "system_prompt": tm_obj.system_prompt,
+            "model_provider": tm_obj.model_provider, "model_name": tm_obj.model_name,
+            "api_key_ref": tm_obj.api_key_ref,
+        }
+        teammate_cache.set(tm_id, tm)
+        return tm
+
+    all_teammates = []
+    if teammate_ids:
+        # Only the specified teammates
+        for tm_id in teammate_ids:
+            tm = await _load_teammate(tm_id)
+            if tm and tm.get("api_key_ref"):
+                all_teammates.append(tm)
+        if not all_teammates:
+            raise HTTPException(status_code=400, detail="No specified teammates found or have API keys")
     else:
-        t_result = await db.execute(select(Teammate).where(Teammate.id == teammate_id))
-        tm = t_result.scalar_one_or_none()
-        if not tm:
-            raise HTTPException(status_code=404, detail="Teammate not found")
-        tm_system_prompt = tm.system_prompt
-        tm_model_provider = tm.model_provider
-        tm_model_name = tm.model_name
-        tm_api_key_ref = tm.api_key_ref
-        tm_name = tm.name
-        teammate_cache.set(teammate_id, {
-            "id": tm.id, "name": tm.name, "role": tm.role,
-            "avatar_emoji": tm.avatar_emoji, "system_prompt": tm.system_prompt,
-            "model_provider": tm.model_provider, "model_name": tm.model_name,
-            "api_key_ref": tm.api_key_ref,
-        })
+        # All channel teammates
+        for tm_id in channel_data:
+            tm = await _load_teammate(tm_id)
+            if tm and tm.get("api_key_ref"):
+                all_teammates.append(tm)
+        if not all_teammates:
+            raise HTTPException(status_code=400, detail="No teammates with API keys found in this channel")
 
-    if not tm_api_key_ref:
-        raise HTTPException(status_code=400, detail="Teammate has no API key configured")
-
-    # ── Load API key (cache-first) ──
-    apikey = apikey_cache.get(tm_api_key_ref)
-    if apikey is not None:
-        api_key_val = apikey["api_key"]
-        base_url_val = apikey["base_url"]
-    else:
-        k_result = await db.execute(select(APIKey).where(APIKey.id == tm_api_key_ref))
-        apikey_obj = k_result.scalar_one_or_none()
-        if not apikey_obj or not apikey_obj.api_key:
-            raise HTTPException(status_code=400, detail="API key not found")
-        api_key_val = apikey_obj.api_key
-        base_url_val = apikey_obj.base_url
-        apikey_cache.set(tm_api_key_ref, {
-            "id": apikey_obj.id, "provider": apikey_obj.provider,
-            "api_key": apikey_obj.api_key, "base_url": apikey_obj.base_url,
-        })
-
-    # ── Load message history ──
-    cached_msgs = message_cache.get(channel_id)
-    if cached_msgs is not None:
-        all_messages = cached_msgs
-    else:
-        hist_result = await db.execute(
-            select(Message).where(Message.channel_id == channel_id).order_by(Message.created_at)
-        )
-        all_messages = list(hist_result.scalars().all())
-        message_cache.set(channel_id, all_messages)
-
-    # ── Step 1: Build fixed-prefix messages (9 messages, structure stable) ──
-    recent_turns = extract_recent_turns(all_messages, k=3)
-    fixed_messages = build_fixed_prefix(
-        system_prompt=tm_system_prompt,
-        recent_turns=recent_turns,
-        current_content=content,
+    # ── Load message history (always from DB to avoid truncated cache) ──
+    hist_result = await db.execute(
+        select(Message).where(Message.channel_id == channel_id).order_by(Message.created_at)
     )
+    all_messages = list(hist_result.scalars().all())
 
-    logger.info(
-        f"LLM call: channel={channel_id[:8]}... teammate={tm_name} "
-        f"messages={len(fixed_messages)} "
-        f"system_hash={hash(tm_system_prompt) & 0xFFFFFFFF:08x}"
-    )
-
-    # ── Step 2: Cache warming (static only, 9 messages) ──
-    if WARMUP_ENABLED and not is_warmed_up(teammate_id, channel_id):
-        logger.info(f"Cache warming: priming DeepSeek cache for {tm_name}")
-        try:
-            # Warmup 使用完整的 9 条 messages（包含 system）
-            # 这样 DeepSeek 建立的 cache entry 与真实请求一致
-            warmup_ok = await warmup_cache(
-                system_prompt=tm_system_prompt,
-                provider=tm_model_provider,
-                model=tm_model_name,
-                api_key=api_key_val,
-                base_url=base_url_val,
-            )
-            if warmup_ok:
-                mark_warmed_up(teammate_id, channel_id)
-        except Exception as e:
-            logger.warning(f"Cache warming failed (non-fatal): {e}")
-
-    # ── Step 3: Stream the actual response ──
-    # 使用列表收集所有 chunk，在流式响应结束后同步保存
-    collected_chunks = []
+    # ── Stream team collaboration response ──
+    collected_events: list[dict] = []  # structured events — no SSE re-parse needed
 
     async def generate():
         try:
-            _gen = stream_ai_response(
-                system_prompt=tm_system_prompt,
-                messages=fixed_messages[1:],
-                provider=tm_model_provider,
-                model=tm_model_name,
-                api_key=api_key_val,
-                base_url=base_url_val,
+            async for chunk in generate_team_response(
+                teammates=all_teammates,
+                user_message=content,
                 channel_id=channel_id,
-                teammate_id=teammate_id,
-            )
-            async for chunk in _gen:
-                collected_chunks.append(chunk)
+                shared_attachment_context=shared_attachment_context,
+            ):
+                # Parse structured event from SSE line for DB saving
+                if chunk.startswith("data:") and not chunk.startswith("data: [DONE]"):
+                    try:
+                        evt = json.loads(chunk[5:].strip().rstrip("\n"))
+                        collected_events.append(evt)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
                 yield chunk
         except Exception as e:
             import traceback
             traceback.print_exc()
-            yield f"\n\n⚠️ AI Error: {str(e)}"
+            yield f"\n\n⚠️ Team Error: {str(e)}"
 
-    # Start streaming response
-    response = StreamingResponse(generate(), media_type="text/plain")
+    response = StreamingResponse(generate(), media_type="text/event-stream")
 
-    # Use BackgroundTask to save AI response after stream completes
-    # Note: collected_chunks is a shared list; after generate() completes, it contains all chunks
+    # Background: save response to DB from structured events (no SSE re-parse)
     async def save_after_stream():
-        """Background task: save AI response after stream completes"""
+        """Background task: save AI response after stream completes."""
         await asyncio.sleep(0.1)  # Brief delay to ensure all chunks collected
-        full_response = "".join(collected_chunks)
-        if not full_response.strip():
-            logger.warning("Empty AI response, skipping save")
+        if not collected_events:
             return
-        await _save_ai_response_to_db(
-            full_response=full_response,
+        await _save_team_response_from_events(
+            events=collected_events,
             channel_id=channel_id,
-            teammate_id=teammate_id,
-            tm_name=tm_name,
+            teammate_ids=[tm["id"] for tm in all_teammates],
+            tm_names=[tm["name"] for tm in all_teammates],
             all_messages=all_messages,
             content=content,
-            provider=tm_model_provider,
-            model=tm_model_name,
-            api_key=api_key_val,
-            base_url=base_url_val,
         )
 
     import asyncio
     from starlette.background import BackgroundTask
-
     response.background = BackgroundTask(save_after_stream)
     return response
 
 
-# ── Helper: Save AI response to DB (used by background task) ──
+# ── Helper: Save AI response to DB from structured events (no SSE re-parse) ──
+
+async def _save_team_response_from_events(
+    events: list[dict],
+    channel_id: str,
+    teammate_ids: list[str],
+    tm_names: list[str],
+    all_messages: list = None,
+    content: Any = None,
+):
+    """Save team collaboration response to database from structured events.
+
+    Accumulates teammate_message chunks by group_id/message_id.
+    No SSE string parsing — events are already parsed during streaming.
+    """
+    try:
+        # Accumulate teammate_message chunks by dedup key
+        responses = {}
+        for event in events:
+            evt_type = event.get("type", "")
+            if evt_type != "teammate_message":
+                continue
+            payload = event.get("payload", {})
+            msg_id = event.get("message_id", "")
+            chunk_content = payload.get("content", "")
+            group_id = payload.get("group_id", "") or event.get("phase", "")
+            dedup_key = group_id or msg_id
+            if dedup_key in responses:
+                responses[dedup_key]["content"] += chunk_content
+            else:
+                responses[dedup_key] = {
+                    "teammate_id": payload.get("teammate_id") or event.get("role", ""),
+                    "message_id": msg_id,
+                    "content": chunk_content,
+                    "author_name": payload.get("author_name", ""),
+                    "phase": event.get("phase", ""),
+                }
+
+        if not responses:
+            return
+
+        # Build name lookup
+        name_map = dict(zip(teammate_ids, tm_names))
+
+        # Build avatar lookup from teammate cache → DB fallback
+        avatar_map = {}
+        from sqlalchemy import select as _select
+        from backend.models import Teammate as _Teammate
+        from backend.database import async_session as _avatar_session
+        for tm_id in teammate_ids:
+            tm_data = teammate_cache.get(tm_id)
+            if tm_data and tm_data.get("avatar_emoji"):
+                avatar_map[tm_id] = tm_data["avatar_emoji"]
+            else:
+                async with _avatar_session() as sess:
+                    tm_result = await sess.execute(_select(_Teammate).where(_Teammate.id == tm_id))
+                    tm_obj = tm_result.scalar_one_or_none()
+                    avatar_map[tm_id] = tm_obj.avatar_emoji if tm_obj else "🤖"
+
+        async with async_session() as sess:
+            for resp in responses.values():
+                tm_id = resp["teammate_id"]
+                msg_id = resp.get("message_id", "")
+                tm_name = name_map.get(tm_id, "Teammate")
+                tm_avatar = avatar_map.get(tm_id, "🤖")
+                ai_msg = Message(
+                    channel_id=channel_id, role="ai",
+                    author_name=tm_name,
+                    author_id=tm_id,          # LEGACY — kept for existing rows
+                    teammate_id=tm_id,         # unified field
+                    message_id=msg_id,        # per-teammate uuid key
+                    avatar_emoji=tm_avatar,
+                    content=resp["content"],
+                )
+                sess.add(ai_msg)
+            await sess.commit()
+            message_cache.invalidate(channel_id)
+            logger.info(f"Team response saved ({len(responses)} individual messages)")
+
+    except Exception as e:
+        logger.error(f"Failed to save team response: {e}", exc_info=True)
+
 
 async def _save_ai_response_to_db(
     full_response: str,
@@ -304,22 +591,14 @@ async def _save_ai_response_to_db(
     teammate_id: str,
     tm_name: str,
     all_messages: list,
-    content: str,
+    content: Any,
     provider: str,
     model: str,
     api_key: str = None,
     base_url: str = None,
 ):
-    """Save AI response to database (called from background task)"""
+    """Save AI response to database (called from background task) — kept for compat"""
     try:
-        # Convert all_messages to dict list
-        history_dicts = []
-        for m in all_messages:
-            if isinstance(m, dict):
-                history_dicts.append({"role": m.get("role", ""), "content": m.get("content", "")})
-            else:
-                history_dicts.append({"role": getattr(m, "role", ""), "content": getattr(m, "content", "")})
-
         async with async_session() as sess:
             ai_msg = Message(
                 channel_id=channel_id, role="ai",
@@ -331,23 +610,7 @@ async def _save_ai_response_to_db(
             message_cache.invalidate(channel_id)
             logger.info(f"AI response saved: {len(full_response)} chars")
 
-        # Memory write-back (non-blocking)
-        new_messages = history_dicts + [
-            {"role": "user", "content": content},
-            {"role": "ai", "content": full_response},
-        ]
-        try:
-            await process_conversation_turn(
-                channel_id=channel_id,
-                teammate_id=teammate_id,
-                messages=new_messages,
-                msg_count=len(all_messages) + 2,
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                base_url=base_url,
-            )
-        except Exception as e:
-            logger.warning(f"Memory write-back failed (non-fatal): {e}")
+        # Memory write-back (non-blocking) — memory kernel is not yet wired
+        logger.debug(f"Memory turn recorded: channel={channel_id} teammate={teammate_id} content_len={len(full_response)}")
     except Exception as e:
         logger.error(f"Failed to save AI response: {e}")

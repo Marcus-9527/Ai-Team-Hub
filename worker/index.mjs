@@ -181,355 +181,6 @@ function extractKeywords(text) {
         return Math.abs(hash).toString(16);
     }
     // ═══════════════════════════════════════════
-    // ⑧ Semantic Cache — Pure JS (no npm deps, Workers-compatible)
-    // ═══════════════════════════════════════════
-    // ── MD5-like hash using djb2 + finalization (Workers compatible, no crypto.subtle needed for sync path) ──
-    function md5Like(str) {
-        // Fast deterministic hash producing hex string — not cryptographically secure but sufficient for cache keys
-        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-        for (let i = 0; i < str.length; i++) {
-            const ch = str.charCodeAt(i);
-            h1 = Math.imul(h1 ^ ch, 2654435761);
-            h2 = Math.imul(h2 ^ ch, 1597334677);
-        }
-        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
-        h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
-        h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-        const combined = 4294967296 * (2097151 & h2) + (h1 >>> 0);
-        return combined.toString(16).padStart(16, '0');
-    }
-    // ── Request Normalizer ──
-    const SEM_INTENTS = ['question', 'code', 'analysis', 'reasoning', 'creative', 'planning', 'modification'];
-    const SEM_DOMAINS = ['programming', 'data', 'design', 'business', 'general', 'math', 'system'];
-    const SEM_STOPWORDS_ZH = new Set(['的','了','是','在','我','有','和','就','不','人','都','一','上','也','很','到','说','要','去','你','会','着','没','看','这','他','她','它','们','那','些','被','把','让','给','对','但','而','又','与','从','为','之','等','及','或','则','虽','却','因','若','所','以','于','中','其','如','个','里','后','前','下','吗','呢','吧','啊','嘛','哦','哈','呀','哪','什','么','怎','多','少','几','还','更','最','比','同','过','将','当','只','已','可','能','须','需','该','此','每','任','何']);
-    const SEM_STOPWORDS_EN = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','may','might','can','shall','to','of','in','for','on','with','at','by','from','as','into','through','during','before','after','above','below','between','out','off','over','under','again','further','then','once','here','there','when','where','why','how','all','both','each','few','more','most','other','some','such','no','nor','not','only','own','same','so','than','too','very','just','because','if','or','and','but','it','its','this','that','these','those','i','me','my','we','us','our','you','your','he','him','his','she','her','they','them','their','what','which','who','whom']);
-    // Intent keyword scoring map
-    const INTENT_KEYWORDS = {
-        question: ['什么','为什么','怎么','如何','哪个','哪些','吗','呢','what','why','how','when','where','which','who','whom','?','？','explain','describe','tell','define','clarify','meaning'],
-        code: ['写代码','实现','编码','编程','开发','函数','类','方法','变量','调试','部署','重构','write code','implement','code','function','class','method','variable','debug','deploy','refactor','program','algorithm','api','sdk','library','module','import','export','compile','build','test'],
-        analysis: ['分析','对比','比较','评估','统计','优缺点','analyze','compare','evaluate','assess','statistics','pros and cons','review','audit','benchmark','measure','metrics','performance','optimize','diagnose'],
-        reasoning: ['推理','证明','推导','假设','逻辑','因果','reason','prove','derive','assume','logic','causal','deduce','infer','conclude','argument','premise','hypothesis','corollary','theorem'],
-        creative: ['设计','创作','构思','创意','想象','新','创新','design','create','compose',' Brainstorm','imagine','innovate','invent','novel','original','creative','generate','draft','sketch','story','poem'],
-        planning: ['计划','规划','安排','步骤','流程','路线','plan','schedule','arrange','step','process','roadmap','strategy','milestone','timeline','sequence','workflow','pipeline','phase','stage'],
-        modification: ['修改','变更','更新','调整','优化','重写','修复','重构','modify','change','update','adjust','optimize','rewrite','fix','refactor','patch','edit','alter','transform','migrate','upgrade'],
-    };
-    // Domain keyword scoring map
-    const DOMAIN_KEYWORDS = {
-        programming: ['代码','编程','函数','类','API','算法','编程语言','code','programming','function','class','algorithm','language','framework','software','git','docker','k8s','database','sql','nosql'],
-        data: ['数据','统计','分析','可视化','ETL','清洗','data','dataset','statistics','analytics','visualization','etl','pipeline','warehouse','lake','spark','pandas','numpy','ml','ai','model'],
-        design: ['设计','UI','UX','界面','原型','样式','design','ui','ux','interface','prototype','style','layout','font','color','responsive','accessibility','figma','sketch','component','pattern'],
-        business: ['业务','市场','需求','用户','产品','运营','增长','business','market','requirement','user','product','operation','growth','revenue','kpi','roi','customer','stakeholder','value'],
-        math: ['数学','计算','方程','矩阵','微积分','概率','math','equation','matrix','calculus','probability','statistics','linear algebra','topology','geometry','integral','derivative','optimization'],
-        system: ['系统','架构','服务','部署','运维','监控','system','architecture','service','deploy','devops','monitoring','infrastructure','server','cluster','nodes','microservice','container'],
-    };
-    function detectLanguage(text) {
-        let zhCount = 0, enCount = 0;
-        for (const ch of text) {
-            const code = ch.charCodeAt(0);
-            if (code >= 0x4e00 && code <= 0x9fff) zhCount++;
-            else if ((code >= 0x61 && code <= 0x7a) || (code >= 0x41 && code <= 0x5a)) enCount++;
-        }
-        const total = zhCount + enCount;
-        if (total === 0) return { primary: 'unknown', zhRatio: 0, enRatio: 0, zhCount, enCount };
-        return { primary: zhCount >= enCount ? 'zh' : 'en', zhRatio: zhCount / total, enRatio: enCount / total, zhCount, enCount };
-    }
-    function semClassifyIntent(text) {
-        const lower = text.toLowerCase();
-        const scores = {};
-        for (const intent of SEM_INTENTS) scores[intent] = 0;
-        // Keyword scoring
-        for (const [intent, keywords] of Object.entries(INTENT_KEYWORDS)) {
-            for (const kw of keywords) {
-                if (lower.includes(kw.toLowerCase())) scores[intent] += 2;
-            }
-        }
-        // Code indicators: +4 to question if code-like patterns found
-        if (/```|def |class |function |const |import |return |if \(|for \(|while \(|=>\s*\{|<\w+>/.test(text)) {
-            scores.code += 4;
-            scores.question += 4;
-        }
-        // Question indicators: +3
-        if (/[？?]/.test(text) || /\b(what|why|how|when|where|which|who)\b/i.test(text)) {
-            scores.question += 3;
-        }
-        // Pick highest
-        let best = 'question', bestScore = 0;
-        for (const [intent, score] of Object.entries(scores)) {
-            if (score > bestScore) { bestScore = score; best = intent; }
-        }
-        return best;
-    }
-    function extractDomain(text) {
-        const lower = text.toLowerCase();
-        const scores = {};
-        for (const domain of SEM_DOMAINS) scores[domain] = 0;
-        for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
-            for (const kw of keywords) {
-                if (lower.includes(kw.toLowerCase())) scores[domain] += 2;
-            }
-        }
-        let best = 'general', bestScore = 0;
-        for (const [domain, score] of Object.entries(scores)) {
-            if (score > bestScore) { bestScore = score; best = domain; }
-        }
-        return best;
-    }
-    function computeComplexity(text, intent) {
-        let complexity = 0.3;
-        // Length factor
-        const len = text.length;
-        if (len > 500) complexity += 0.15;
-        else if (len > 200) complexity += 0.08;
-        // Code presence
-        if (/```|def |class |function |import |return /.test(text)) complexity += 0.15;
-        // Multi-step indicators
-        if (/步骤|第\d|step \d|first|second|third|then|finally|接着|然后|最后/.test(text)) complexity += 0.1;
-        // Intent adjustment
-        const intentAdj = { code: 0.15, reasoning: 0.2, analysis: 0.15, planning: 0.1, creative: 0.05, question: 0, modification: 0.1 };
-        complexity += intentAdj[intent] || 0;
-        return Math.min(1.0, complexity);
-    }
-    function canonicalize(text) {
-        let s = text.toLowerCase().trim();
-        // Remove trailing punctuation
-        s = s.replace(/[。？！，、；：""''（）【】《》…·.?!',;:"()\[\]{}<>]+$/, '');
-        // Normalize quotes
-        s = s.replace(/[''`´]/g, "'").replace(/[""„]/g, '"');
-        // Compress whitespace
-        s = s.replace(/\s+/g, ' ');
-        return s;
-    }
-    function extractSemanticKeywords(text) {
-        const keywords = [];
-        // Chinese segments: 2+ consecutive CJK characters
-        const zhSegments = text.match(/[\u4e00-\u9fff]{2,}/g) || [];
-        for (const seg of zhSegments) {
-            // Split into 2-char chunks (bigrams) for short segments, or whole segment if short
-            if (seg.length <= 4) {
-                if (!SEM_STOPWORDS_ZH.has(seg)) keywords.push(seg);
-            } else {
-                for (let i = 0; i < seg.length - 1; i++) {
-                    const bigram = seg.slice(i, i + 2);
-                    if (!SEM_STOPWORDS_ZH.has(bigram)) keywords.push(bigram);
-                }
-            }
-        }
-        // English words: 4+ letters, not stopwords
-        const enWords = text.toLowerCase().match(/[a-z]{4,}/g) || [];
-        for (const w of enWords) {
-            if (!SEM_STOPWORDS_EN.has(w)) keywords.push(w);
-        }
-        return [...new Set(keywords)].slice(0, 20);
-    }
-    function normalizeRequest(text) {
-        const language = detectLanguage(text);
-        const intent = semClassifyIntent(text);
-        const domain = extractDomain(text);
-        const complexity = computeComplexity(text, intent);
-        const canonical = canonicalize(text);
-        const keywords = extractSemanticKeywords(text);
-        return { intent, domain, complexity, language, canonical, keywords };
-    }
-    // ── Semantic Cache Key ──
-    function computeSemanticKey(normalized, agentId = '', channelId = '', systemPrompt = '') {
-        const { intent, domain, complexity, keywords } = normalized;
-        const tier = complexity < 0.3 ? 'low' : complexity < 0.6 ? 'mid' : 'high';
-        const systemHash = systemPrompt ? md5Like(systemPrompt).slice(0, 8) : '';
-        const sortedKws = [...keywords].sort();
-        const keywordsHash = sortedKws.length > 0 ? md5Like(sortedKws.join('|')).slice(0, 8) : '';
-        const raw = `${intent}:${domain}:${tier}:${agentId}:${systemHash}:${keywordsHash}:v1`;
-        return md5Like(raw).slice(0, 16);
-    }
-    // ── Multi-Layer TTL Cache (Map + Date.now expiry) ──
-    class MultiLayerCache {
-        constructor() {
-            this.layers = {
-                planner:   { store: new Map(), maxSize: 256, ttlMs: 600_000 },
-                executor:  { store: new Map(), maxSize: 128, ttlMs: 300_000 },
-                output:    { store: new Map(), maxSize: 512, ttlMs: 900_000 },
-            };
-        }
-        get(layer, key) {
-            const l = this.layers[layer];
-            if (!l) return undefined;
-            const entry = l.store.get(key);
-            if (!entry) return undefined;
-            if (Date.now() - entry.ts > l.ttlMs) { l.store.delete(key); return undefined; }
-            return entry.value;
-        }
-        set(layer, key, value) {
-            const l = this.layers[layer];
-            if (!l) return;
-            if (l.store.size >= l.maxSize) {
-                // FIFO eviction: delete oldest
-                const firstKey = l.store.keys().next().value;
-                l.store.delete(firstKey);
-            }
-            l.store.set(key, { value, ts: Date.now() });
-        }
-        clear() {
-            for (const l of Object.values(this.layers)) l.store.clear();
-        }
-        stats() {
-            const s = {};
-            for (const [name, l] of Object.entries(this.layers)) {
-                s[name] = { size: l.store.size, maxSize: l.maxSize, ttlMs: l.ttlMs };
-            }
-            return s;
-        }
-    }
-    // ── Sparse Vector + Feature Hashing ──
-    class SparseVector {
-        constructor(dim = 256) {
-            this.dim = dim;
-            this.data = new Float32Array(dim);
-        }
-        set(index, value) {
-            if (index >= 0 && index < this.dim) this.data[index] += value;
-        }
-        norm() {
-            let sum = 0;
-            for (let i = 0; i < this.dim; i++) sum += this.data[i] * this.data[i];
-            return Math.sqrt(sum);
-        }
-        dot(other) {
-            let sum = 0;
-            const len = Math.min(this.dim, other.dim);
-            for (let i = 0; i < len; i++) sum += this.data[i] * other.data[i];
-            return sum;
-        }
-        cosine(other) {
-            const n1 = this.norm(), n2 = other.norm();
-            if (n1 === 0 || n2 === 0) return 0;
-            return this.dot(other) / (n1 * n2);
-        }
-    }
-    function featureHash(feature, dim) {
-        // Use md5Like to get a deterministic index
-        const h = md5Like(feature);
-        return parseInt(h.slice(0, 8), 16) % dim;
-    }
-    function textToVector(text, dim = 256) {
-        const vec = new SparseVector(dim);
-        // Unigrams (+1.0)
-        const tokens = text.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        for (const t of tokens) vec.set(featureHash(t, dim), 1.0);
-        // Bigrams (+0.5)
-        for (let i = 0; i < tokens.length - 1; i++) {
-            vec.set(featureHash(tokens[i] + '_' + tokens[i + 1], dim), 0.5);
-        }
-        // Chinese characters
-        const zhChars = [];
-        for (const ch of text) {
-            const code = ch.charCodeAt(0);
-            if (code >= 0x4e00 && code <= 0x9fff) zhChars.push(ch);
-        }
-        // zh char bigrams (+0.8)
-        for (let i = 0; i < zhChars.length - 1; i++) {
-            vec.set(featureHash(zhChars[i] + zhChars[i + 1], dim), 0.8);
-        }
-        // zh char trigrams (+0.6)
-        for (let i = 0; i < zhChars.length - 2; i++) {
-            vec.set(featureHash(zhChars[i] + zhChars[i + 1] + zhChars[i + 2], dim), 0.6);
-        }
-        return vec;
-    }
-    // ── Embedding Cache (cosine similarity threshold 0.92) ──
-    class EmbeddingCache {
-        constructor(maxEntries = 512, threshold = 0.92) {
-            this.entries = []; // { key, vector, value, ts }
-            this.maxEntries = maxEntries;
-            this.threshold = threshold;
-            this.hits = 0;
-            this.misses = 0;
-        }
-        lookup(queryVec) {
-            let bestSim = 0, bestIdx = -1;
-            for (let i = 0; i < this.entries.length; i++) {
-                const sim = queryVec.cosine(this.entries[i].vector);
-                if (sim > bestSim) { bestSim = sim; bestIdx = i; }
-            }
-            if (bestSim >= this.threshold && bestIdx >= 0) {
-                this.hits++;
-                return { found: true, value: this.entries[bestIdx].value, similarity: bestSim, key: this.entries[bestIdx].key };
-            }
-            this.misses++;
-            return { found: false, similarity: bestSim };
-        }
-        store(key, vector, value) {
-            // Check if key already exists — update
-            for (let i = 0; i < this.entries.length; i++) {
-                if (this.entries[i].key === key) {
-                    this.entries[i] = { key, vector, value, ts: Date.now() };
-                    return;
-                }
-            }
-            // FIFO eviction
-            if (this.entries.length >= this.maxEntries) this.entries.shift();
-            this.entries.push({ key, vector, value, ts: Date.now() });
-        }
-        clear() { this.entries = []; this.hits = 0; this.misses = 0; }
-        stats() { return { size: this.entries.length, maxEntries: this.maxEntries, threshold: this.threshold, hits: this.hits, misses: this.misses }; }
-    }
-    // ── Prompt Deduplicator ──
-    class PromptDeduplicator {
-        constructor(maxBase = 64) {
-            this.baseCache = new Map(); // baseKey → basePrompt
-            this.maxBase = maxBase;
-        }
-        buildPrompt(baseKey, delta) {
-            // Check if base exists
-            let baseReused = false;
-            let basePrompt = this.baseCache.get(baseKey);
-            if (basePrompt) {
-                baseReused = true;
-            } else {
-                basePrompt = delta; // first time, base = delta
-                if (this.baseCache.size >= this.maxBase) {
-                    const firstKey = this.baseCache.keys().next().value;
-                    this.baseCache.delete(firstKey);
-                }
-                this.baseCache.set(baseKey, basePrompt);
-            }
-            const fullPrompt = baseReused ? `${basePrompt}\n---\n${delta}` : basePrompt;
-            const tokensSaved = baseReused ? Math.ceil(basePrompt.length / 4) : 0; // rough token estimate
-            return { baseKey, delta, fullPrompt, baseReused, tokensSaved };
-        }
-        stats() { return { baseCacheSize: this.baseCache.size, maxBase: this.maxBase }; }
-        clear() { this.baseCache.clear(); }
-    }
-    // ── Global Semantic Cache Instances ──
-    const semanticMultiLayerCache = new MultiLayerCache();
-    const semanticEmbeddingCache = new EmbeddingCache(512, 0.92);
-    const semanticPromptDedup = new PromptDeduplicator(64);
-    // ── Semantic Cache Lookup Helper ──
-    function semanticCacheLookup(text, agentId, channelId, systemPrompt) {
-        const normalized = normalizeRequest(text);
-        const exactKey = computeSemanticKey(normalized, agentId, channelId, systemPrompt);
-        // 1. Check multi-layer exact cache (output layer)
-        const exactHit = semanticMultiLayerCache.get('output', exactKey);
-        if (exactHit !== undefined) {
-            return { hit: true, source: 'exact', result: exactHit, key: exactKey, normalized };
-        }
-        // 2. Check embedding fuzzy match
-        const vec = textToVector(text);
-        const embResult = semanticEmbeddingCache.lookup(vec);
-        if (embResult.found) {
-            return { hit: true, source: 'embedding', result: embResult.value, key: embResult.key, similarity: embResult.similarity, normalized };
-        }
-        return { hit: false, key: exactKey, normalized, vector: vec };
-    }
-    // ── Semantic Cache Store Helper ──
-    function semanticCacheStore(key, vector, result, text) {
-        semanticMultiLayerCache.set('output', key, result);
-        if (vector) {
-            semanticEmbeddingCache.store(key, vector, result);
-        } else {
-            semanticEmbeddingCache.store(key, textToVector(text), result);
-        }
-    }
-    // ═══════════════════════════════════════════
     // ① Agent Runtime
     // ═══════════════════════════════════════════
     // ── v2.3: Role Cognitive Lock + Cognitive Diversity ──
@@ -681,26 +332,6 @@ function extractKeywords(text) {
         if (!def) {
             return { agentId, status: 'error', result: '', reasoning: '', nextAction: '', tokensUsed: 0, latencyMs: 0, error: `Unknown agent: ${agentId}` };
         }
-        // ── Semantic Cache: check planner/executor layer before building prompt ──
-        const cacheLayer = agentId === 'planner' ? 'planner' : agentId === 'executor' ? 'executor' : 'output';
-        const agentCacheLookup = semanticCacheLookup(input.task || '', agentId, '', def.systemPrompt);
-        if (agentCacheLookup.hit) {
-            // Reconstruct cached result as agent response
-            const cached = agentCacheLookup.result;
-            const parsed = parseAgentJsonStrict(typeof cached === 'string' ? cached : JSON.stringify(cached));
-            return {
-                agentId,
-                status: parsed.status,
-                result: parsed.result,
-                reasoning: parsed.reasoning + ' [cache-hit:' + agentCacheLookup.source + ']',
-                nextAction: parsed.nextAction,
-                tokensUsed: 0,
-                latencyMs: Date.now() - start,
-                error: '',
-                retryCount: 0,
-                fromCache: true,
-            };
-        }
         // ── v2.2: 每个 agent 的 prompt 完全独立，不共享任何 context ──
         const prompt = [
             def.systemPrompt,
@@ -779,10 +410,6 @@ function extractKeywords(text) {
                 }
                 // ── v2.1: Strict JSON parsing with multi-strategy fallback ──
                 const parsed = parseAgentJsonStrict(full);
-                // ── Semantic Cache: store successful agent result ──
-                if (parsed.status === 'success' && parsed.result) {
-                    semanticCacheStore(agentCacheLookup.key, agentCacheLookup.vector, full, input.task || '');
-                }
                 return {
                     agentId,
                     status: parsed.status,
@@ -1321,228 +948,7 @@ function extractKeywords(text) {
         record('COMPLETE', '', {}, { mode: 'COMPLEX', llmCalls: ctx.llmCalls, diversityScore: diversityReport.overallDiversityScore, homogenized: diversityReport.homogenizationDetected }, 0);
         return { context: ctx, trace };
     }
-    // ── v2.1: Review Output Schema ──
-    const REVIEW_SCHEMA = `{
-  "pass": boolean,
-  "reason": "string (brief reason)",
-  "suggestions": "string (actionable suggestions)",
-  "failure_category": "missing_content | wrong_scope | poor_quality | incomplete | off_topic | format_error | none",
-  "root_cause": "string (which agent/node failed and why)",
-  "severity": "critical | major | minor | none"
-}`;
-    async function runOrchestrator(task, intent, apiKey, provider, model, baseUrl, db) {
-        const traceId = crypto.randomUUID().slice(0, 12);
-        const trace = [];
-        const record = (step, agent, inputData, outputData, latencyMs, tokens = 0) => {
-            trace.push({ traceId, taskId: ctx.taskId, step, agent, inputData, outputData, latencyMs, tokens, ts: Date.now() });
-        };
-        const ctx = {
-            taskId: crypto.randomUUID().slice(0, 12),
-            userInput: task,
-            intent: intent || classifyIntent(task),
-            state: 'INIT',
-            plan: {},
-            dagResults: {},
-            reviewResult: {},
-            finalResult: '',
-            turnCount: 0,
-            error: '',
-        };
-        const memCtx = await loadContext(db, ctx.taskId);
-        const histBlk = await loadHistory(db, ctx.taskId);
-        // INIT → PLAN
-        record('INIT', '', { task, intent: ctx.intent }, { agents: getAgentsForIntent(ctx.intent) }, 0);
-        ctx.state = 'PLAN';
-        // PLAN
-        const planStart = Date.now();
-        const planInput = {
-            task: `制定执行计划：${task}`,
-            roleContext: `原始任务：${task}`,
-            expectedOutput: '任务拆解方案（JSON）',
-        };
-        const planResult = await callAgent('planner', planInput, apiKey, provider, model, baseUrl);
-        ctx.plan = { strategy: planResult.result, reasoning: planResult.reasoning, agents: getAgentsForIntent(ctx.intent) };
-        record('PLAN', 'planner', { task }, ctx.plan, planResult.latencyMs, planResult.tokensUsed);
-        ctx.state = 'EXECUTE';
-        // EXECUTE (DAG)
-        const execStart = Date.now();
-        const dag = buildDag(ctx.intent, task);
-        const dagResults = await dag.execute({ apiKey, provider, model, baseUrl, originalTask: task, previousResults: {} });
-        ctx.dagResults = Object.fromEntries([...dagResults.entries()].map(([k, v]) => [k, v]));
-        const successResults = [...dagResults.values()].filter(r => r.status === 'success');
-        if (successResults.length > 0) {
-            ctx.finalResult = successResults.map(r => `[${r.agentId}]: ${r.result}`).join('\n\n');
-        }
-        // ── v2.1: Propagate error_category from agent results to DAG results ──
-        for (const [nodeId, nodeResult] of Object.entries(ctx.dagResults)) {
-            const dagR = nodeResult;
-            if (dagR.errorCategory) {
-                dagR.error_category = dagR.errorCategory;
-            }
-            // For skipped nodes, mark as dependency_failure
-            if (dagR.status === 'skipped' && !dagR.error_category) {
-                dagR.error_category = 'dependency_failure';
-            }
-        }
-        record('EXECUTE', '', {}, { results: ctx.dagResults, successCount: successResults.length }, Date.now() - execStart);
-        ctx.state = 'REVIEW';
-        // ── v2.1: Enhanced Review with failure categorization ──
-        const reviewStart = Date.now();
-        const reviewPrompt = [
-            '评估以下任务执行结果的质量。',
-            '',
-            `[TASK] ${task}`,
-            '',
-            `[RESULT] ${ctx.finalResult.slice(0, 800)}`,
-            '',
-            `[DAG RESULTS]`,
-            ...Object.entries(ctx.dagResults).map(([k, v]) => `- ${k} (${v.agentId}): status=${v.status}, len=${(v.result || '').length}`),
-            '',
-            `[OUTPUT FORMAT — MANDATORY]`,
-            'Respond with ONLY a JSON object matching:',
-            REVIEW_SCHEMA,
-            '',
-            'EVALUATION CRITERIA:',
-            '1. Is the result complete and substantive? (not empty or trivial)',
-            '2. Does it address the original task?',
-            '3. Is the quality actionable and specific?',
-            '4. failure_category: Choose from missing_content, wrong_scope, poor_quality, incomplete, off_topic, format_error, none',
-            '5. root_cause: Identify which agent/node failed and why',
-            '6. severity: critical (unusable), major (needs rework), minor (acceptable with issues), none',
-        ].join('\n');
-        const reviewInput = {
-            task: reviewPrompt,
-            roleContext: `待评审结果：${ctx.finalResult.slice(0, 500)}`,
-            expectedOutput: '评审结果（JSON）：pass/fail + failure_category + root_cause + severity',
-        };
-        const reviewResult = await callAgent('reviewer', reviewInput, apiKey, provider, model, baseUrl);
-        // ── v2.2: Enhanced review fallback when agent fails ──
-        if (!reviewResult.result || reviewResult.status === 'error') {
-            ctx.reviewResult = {
-                pass: false,
-                reason: 'Review agent failed: ' + (reviewResult.error || 'unknown error'),
-                suggestions: 'Retry with simpler task or check API key balance',
-                failureCategory: 'format_error',
-                rootCause: 'reviewer returned error: ' + (reviewResult.error || '').slice(0, 100),
-                severity: 'major',
-            };
-        }
-        else {
-            ctx.reviewResult = parseReviewEnhanced(reviewResult.result);
-        }
-        ctx.turnCount++;
-        record('REVIEW', 'reviewer', { resultPreview: ctx.finalResult.slice(0, 200) }, ctx.reviewResult, reviewStart ? Date.now() - reviewStart : 0, reviewResult.tokensUsed);
-        // ── v2.1: Smart repair — use failure category to decide strategy ──
-        if (!ctx.reviewResult.pass && ctx.turnCount < 3) {
-            const shouldRepair = ctx.reviewResult.severity !== 'critical' || ctx.turnCount < 2;
-            if (shouldRepair) {
-                ctx.state = 'REPAIR';
-                const repairStart = Date.now();
-                // Build targeted repair prompt based on failure category
-                let repairStrategy = '修复改进';
-                switch (ctx.reviewResult.failureCategory) {
-                    case 'missing_content':
-                        repairStrategy = '补充缺失内容，确保输出完整';
-                        break;
-                    case 'wrong_scope':
-                        repairStrategy = '纠正方向，聚焦原始任务目标';
-                        break;
-                    case 'poor_quality':
-                        repairStrategy = '提升质量，增加具体细节和深度';
-                        break;
-                    case 'incomplete':
-                        repairStrategy = '补全未完成的部分';
-                        break;
-                    case 'off_topic':
-                        repairStrategy = '回归主题，忽略无关内容';
-                        break;
-                    case 'format_error':
-                        repairStrategy = '修正格式，确保输出结构正确';
-                        break;
-                }
-                const repairPrompt = [
-                    `任务：${task}`,
-                    '',
-                    `[CURRENT RESULT] ${ctx.finalResult.slice(0, 500)}`,
-                    '',
-                    `[REVIEW FEEDBACK]`,
-                    `判定：${ctx.reviewResult.pass ? 'PASS' : 'FAIL'}`,
-                    `原因：${ctx.reviewResult.reason}`,
-                    `失败类别：${ctx.reviewResult.failureCategory}`,
-                    `根因：${ctx.reviewResult.rootCause}`,
-                    `严重程度：${ctx.reviewResult.severity}`,
-                    `建议：${ctx.reviewResult.suggestions}`,
-                    '',
-                    `[REPAIR STRATEGY] ${repairStrategy}`,
-                    '',
-                    '请基于以上反馈修复并改进结果。输出完整的改进后内容。',
-                ].join('\n');
-                const repairInput = {
-                    task: repairPrompt,
-                    roleContext: `评审反馈：${ctx.reviewResult.reason}`,
-                    expectedOutput: '修复后的代码（JSON）：{"status":"success","result":"[修复后代码]","reasoning":"","next_action":""}',
-                };
-                const repairResult = await callAgent('executor', repairInput, apiKey, provider, model, baseUrl);
-                ctx.finalResult = repairResult.result;
-                record('REPAIR', 'executor', { review: ctx.reviewResult, strategy: repairStrategy }, { repaired: repairResult.result.slice(0, 200) }, Date.now() - repairStart, repairResult.tokensUsed);
-            }
-        }
-        ctx.state = 'DONE';
-        record('COMPLETE', '', {}, { finalState: 'DONE', resultLength: ctx.finalResult.length, turnCount: ctx.turnCount }, 0);
-        await saveTrace(db, ctx.taskId, traceId, ctx, trace);
-        return { context: ctx, trace };
-    }
-    function classifyIntent(task) {
-        const t = task.toLowerCase();
-        if (/代码|code|编程|函数|class|debug|修复/.test(t))
-            return 'code';
-        if (/分析|analyze|数据|趋势|统计/.test(t))
-            return 'analysis';
-        if (/推理|reasoning|为什么|原因|解释/.test(t))
-            return 'reasoning';
-        return 'complex';
-    }
-    function getAgentsForIntent(intent) {
-        const rules = {
-            analysis: ['planner', 'researcher', 'reviewer'],
-            code: ['planner', 'executor', 'reviewer'],
-            reasoning: ['planner', 'researcher'],
-            complex: ['planner', 'researcher', 'executor', 'reviewer'],
-        };
-        return rules[intent] || ['planner'];
-    }
-    // ── v2.1: DAG with full task context injection ──
-    function buildDag(intent, task) {
-        const dag = new DAGEngine();
-        // v2.2: 使用新的 agent id（planner/executor/reviewer/researcher）和 taskDescription
-        if (intent === 'code') {
-            dag.addNode({ id: 'plan', agentId: 'planner', taskDescription: `分析需求并制定执行计划：${task}`, dependencies: [], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'code', agentId: 'executor', taskDescription: `根据 plan 的拆解方案编写代码：${task}`, dependencies: ['plan'], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'review', agentId: 'reviewer', taskDescription: `评审 code 输出的代码质量：${task}`, dependencies: ['code'], retryCount: 3, timeout: 120 });
-            dag.addEdge('plan', 'code');
-            dag.addEdge('code', 'review');
-        }
-        else if (intent === 'analysis') {
-            dag.addNode({ id: 'plan', agentId: 'planner', taskDescription: `制定分析计划：${task}`, dependencies: [], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'research', agentId: 'researcher', taskDescription: `深度调研现有方案：${task}`, dependencies: ['plan'], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'analyze', agentId: 'executor', taskDescription: `基于调研进行数据分析：${task}`, dependencies: ['plan'], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'merge', agentId: 'reviewer', taskDescription: `合并调研和分析结果：${task}`, dependencies: ['research', 'analyze'], retryCount: 3, timeout: 120 });
-            dag.addEdge('plan', 'research');
-            dag.addEdge('plan', 'analyze');
-            dag.addEdge('research', 'merge');
-            dag.addEdge('analyze', 'merge');
-        }
-        else {
-            dag.addNode({ id: 'plan', agentId: 'planner', taskDescription: `任务分解：${task}`, dependencies: [], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'research', agentId: 'researcher', taskDescription: `调研阶段：${task}`, dependencies: ['plan'], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'code', agentId: 'executor', taskDescription: `执行阶段：${task}`, dependencies: ['research'], retryCount: 3, timeout: 120 });
-            dag.addNode({ id: 'review', agentId: 'reviewer', taskDescription: `质量审查：${task}`, dependencies: ['code'], retryCount: 3, timeout: 120 });
-            dag.addEdge('plan', 'research');
-            dag.addEdge('research', 'code');
-            dag.addEdge('code', 'review');
-        }
-        return dag;
-    }
+
     // ── v2.1: Enhanced review parser with failure categorization ──
     function parseReviewEnhanced(raw) {
         const fallback = { pass: false, reason: raw.slice(0, 200), suggestions: '', failureCategory: 'format_error', rootCause: 'Failed to parse review JSON', severity: 'major' };
@@ -1588,14 +994,7 @@ function extractKeywords(text) {
             return '[RECENT CONTEXT]\nNo recent messages.';
         }
     }
-    async function saveTrace(db, taskId, traceId, ctx, trace) {
-        try {
-            await db.prepare(`INSERT OR REPLACE INTO task_states (task_id, trace_id, state, context_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`).bind(taskId, traceId, ctx.state, JSON.stringify({ context: ctx, trace }), Date.now() / 1000, Date.now() / 1000).run();
-        }
-        catch (e) {
-            console.error('Failed to save trace:', e);
-        }
-    }
+
     // ═══════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════
@@ -1837,6 +1236,96 @@ function extractKeywords(text) {
         const { results } = await env.DB.prepare('DELETE FROM messages WHERE channel_id = ? RETURNING id').bind(channelId).all();
         return json({ ok: true, deleted: results.length });
     });
+    // ── ChatGPT-style File Attachment Upload ──
+    route('POST', '/api/messages/:channel_id/file', async (req, match, env) => {
+        try {
+            const channelId = match[1];
+            const ch = await env.DB.prepare('SELECT id FROM channels WHERE id = ?').bind(channelId).first();
+            if (!ch) return error('Channel not found', 404);
+            const ct = req.headers.get('content-type') || '';
+            if (!ct.includes('multipart/form-data')) return error('Expected multipart/form-data', 400);
+            const boundary = ct.split('boundary=')[1];
+            if (!boundary) return error('Missing boundary', 400);
+            const authorName = req.headers.get('X-Author-Name') || 'You';
+            const raw = await req.arrayBuffer();
+            const parts = parseMultipart(raw, boundary);
+            if (!parts.file) return error('No file field', 400);
+            const fileBytes = new Uint8Array(parts.file.data);
+            const fileName = parts.file.filename || 'unknown';
+            const mime = parts.file.mime || 'application/octet-stream';
+            const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+            if (fileBytes.length > 5*1024*1024) return error('File too large (max 5MB)', 413);
+
+            const fileId = genUUID();
+            const now = utcNow();
+            const isImage = mime.startsWith('image/');
+            const isText = isImage || ['txt','md','csv','py','js','ts','json','html','css','xml','yaml','yml','toml','sh','java','go','rs','rb','php','sql','log','conf','ini','pdf','docx'].includes(ext) || mime.startsWith('text/');
+            const previewText = isImage ? '[Image]' : new TextDecoder('utf-8').decode(fileBytes.slice(0, 200));
+
+            // RAG indexing: chunk + embed text files
+            let chunks = [];
+            let rawText = '';
+            if (!isImage) {
+                rawText = new TextDecoder('utf-8').decode(fileBytes) || '';
+                if (rawText.trim()) {
+                    chunks = chunkText(rawText);
+                }
+            }
+
+            // Store file metadata FIRST (file_chunks has FK -> file_uploads)
+            await env.DB.prepare('INSERT INTO file_uploads (id,filename,file_type,size,user_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+                .bind(fileId, fileName, ext || mime, String(fileBytes.length), 'channel:' + channelId, 'ready', now, now).run();
+
+            // Now insert chunks (FK satisfied)
+            for (let i = 0; i < chunks.length; i++) {
+                const emb = embedText(chunks[i].content);
+                const chunkId = genUUID();
+                await env.DB.prepare('INSERT INTO file_chunks (id,file_id,content,"index",embedding,created_at) VALUES (?,?,?,?,?,?)')
+                    .bind(chunkId, fileId, chunks[i].content, String(i), JSON.stringify(emb), now).run();
+            }
+
+            // Create attachment object (ChatGPT-style structured card)
+            const attachment = {
+                file_id: fileId,
+                filename: fileName,
+                mime: mime,
+                size: fileBytes.length,
+                preview_text: previewText,
+                status: 'ready',
+                chunk_count: chunks.length,
+                is_image: isImage,
+                created_at: now,
+            };
+
+            // Save a user message with the file attachment (so it appears in chat)
+            const msgId = genUUID();
+            await env.DB.prepare('INSERT INTO messages (id,channel_id,role,author_name,content,attachments,created_at) VALUES (?,?,?,?,?,?,?)')
+                .bind(msgId, channelId, 'user', authorName, `[上传文件: ${fileName}]`, JSON.stringify([attachment]), now).run();
+
+            return json({
+                file_id: fileId,
+                filename: fileName,
+                mime,
+                size: fileBytes.length,
+                status: 'ready',
+                chunk_count: chunks.length,
+                preview_text: previewText,
+                message_id: msgId,
+            }, 201);
+        } catch (e) {
+            return json({ error: e.message, stack: e.stack }, 500);
+        }
+    });
+
+    // ── List channel files ──
+    route('GET', '/api/channels/:id/files', async (req, match, env) => {
+        const channelId = match[1];
+        const { results } = await env.DB.prepare(
+            'SELECT DISTINCT json_extract(value, \'$.file_id\') as file_id, json_extract(value, \'$.filename\') as filename, json_extract(value, \'$.mime\') as mime, json_extract(value, \'$.size\') as size, json_extract(value, \'$.status\') as status, json_extract(value, \'$.chunk_count\') as chunk_count, json_extract(value, \'$.preview_text\') as preview_text, json_extract(value, \'$.created_at\') as created_at FROM messages, json_each(messages.attachments) WHERE messages.channel_id = ? AND messages.attachments IS NOT NULL ORDER BY messages.created_at DESC'
+        ).bind(channelId).all();
+        return json({ files: results || [], total: (results || []).length });
+    });
+
     route('POST', '/api/messages/:channel_id/system', async (req, match, env) => {
         const channelId = match[1];
         const data = await req.json();
@@ -1873,27 +1362,47 @@ function extractKeywords(text) {
         const apiKeyRow = await env.DB.prepare('SELECT * FROM apikeys WHERE id = ?').bind(tm.api_key_ref).first();
         if (!apiKeyRow || !apiKeyRow.api_key)
             return error('API key not found', 400);
-        // ── Semantic Cache: lookup before LLM call ──
-        const cacheLookup = semanticCacheLookup(content, teammateId, channelId, tm.system_prompt);
-        if (cacheLookup.hit) {
-            const cachedFull = cacheLookup.result;
-            if (cachedFull.trim()) {
-                const aiMsgId = genUUID();
-                try {
-                    await env.DB.prepare('INSERT INTO messages (id, channel_id, role, author_name, author_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(aiMsgId, channelId, 'ai', tm.name, teammateId, cachedFull, utcNow()).run();
+        const { results: msgResults } = await env.DB.prepare('SELECT role, content, attachments FROM messages WHERE channel_id = ? ORDER BY created_at LIMIT 200').bind(channelId).all();
+        // Auto-inject RAG context from channel files
+        let fileContext = '';
+        try {
+            const fileRows = await env.DB.prepare(
+                'SELECT DISTINCT json_extract(value, \'$.file_id\') as file_id FROM messages, json_each(messages.attachments) WHERE messages.channel_id = ? AND messages.attachments IS NOT NULL'
+            ).bind(channelId).all();
+            const fileIds = (fileRows.results || []).map(r => r.file_id).filter(Boolean);
+            if (fileIds.length > 0) {
+                const qEmb = embedText(content);
+                const allChunked = [];
+                for (const fid of fileIds) {
+                    const chunkRows = await env.DB.prepare('SELECT content, "index", embedding FROM file_chunks WHERE file_id = ?').bind(fid).all();
+                    for (const cr of (chunkRows.results || [])) {
+                        if (!cr.embedding) continue;
+                        allChunked.push({ content: cr.content, file_id: fid, score: cosineSim(qEmb, JSON.parse(cr.embedding)) });
+                    }
                 }
-                catch (e) {
-                    console.error('Failed to save cached AI response:', e);
+                allChunked.sort((a, b) => b.score - a.score);
+                const topChunks = allChunked.slice(0, 5);
+                if (topChunks.length > 0) {
+                    fileContext = topChunks.map((c, i) => `[文件引用 ${i + 1}] ${c.content}`).join('\n\n');
                 }
             }
-            const encoder = new TextEncoder();
-            const stream = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(cachedFull)); controller.close(); } });
-            return new Response(stream, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Cache-Hit': cacheLookup.source, 'X-Cache-Key': cacheLookup.key } });
-        }
-        const { results: msgResults } = await env.DB.prepare('SELECT role, content FROM messages WHERE channel_id = ? ORDER BY created_at LIMIT 200').bind(channelId).all();
-        const allMessages = msgResults.map((m) => ({ role: m.role === 'ai' ? 'assistant' : m.role, content: m.content }));
+        } catch (e) { console.error('RAG context error:', e); }
+        const allMessages = msgResults.map((m) => {
+            let msgContent = m.content || '';
+            if (m.attachments) {
+                try {
+                    const atts = JSON.parse(m.attachments);
+                    if (atts[0]?.filename && msgContent.startsWith('[上传文件:')) {
+                        msgContent = `[文件: ${atts[0].filename}]\n预览: ${(atts[0].preview_text || '').slice(0, 200)}`;
+                    }
+                } catch {}
+            }
+            return { role: m.role === 'ai' ? 'assistant' : m.role, content: msgContent };
+        });
         const recentTurns = allMessages.slice(-6);
-        const fixedMessages = buildFixedPrompt(tm.system_prompt, recentTurns, content);
+        let currentContent = content;
+        if (fileContext) currentContent = '[参考文件内容]\n' + fileContext + '\n\n[用户问题]\n' + content;
+        const fixedMessages = buildFixedPrompt(tm.system_prompt, recentTurns, currentContent);
         const provider = tm.model_provider;
         const isAnthropic = provider === 'anthropic';
         const endpoint = getEndpoint(provider, apiKeyRow.base_url);
@@ -1925,9 +1434,7 @@ function extractKeywords(text) {
             full = r.choices[0].message.content;
         else if (r.output?.[0]?.content?.[0]?.text)
             full = r.output[0].content[0].text;
-        // ── Semantic Cache: store after LLM call ──
         if (full.trim()) {
-            semanticCacheStore(cacheLookup.key, cacheLookup.vector, full, content);
             const aiMsgId = genUUID();
             try {
                 await env.DB.prepare('INSERT INTO messages (id, channel_id, role, author_name, author_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(aiMsgId, channelId, 'ai', tm.name, teammateId, full, utcNow()).run();
@@ -1952,7 +1459,7 @@ function extractKeywords(text) {
     });
     // Health
     route('GET', '/api/health', () => {
-        return json({ status: 'ok', service: 'AI Team Hub', version: '2.1.0', engine: 'state_machine_dag', platform: 'cloudflare_workers', semantic_cache: true });
+        return json({ status: 'ok', service: 'AI Team Hub', version: '2.1.0', engine: 'state_machine_dag', platform: 'cloudflare_workers' });
     });
     // Debug: check API key and D1
     route('GET', '/api/debug', async (_req, _match, env) => {
@@ -1964,40 +1471,6 @@ function extractKeywords(text) {
             return json({ db: 'error', detail: e.message }, 500);
         }
     });
-    // ═══════════════════════════════════════════
-    // Semantic Cache API Routes
-    // ═══════════════════════════════════════════
-    route('GET', '/api/semantic-cache/stats', () => {
-        return json({
-            multiLayer: semanticMultiLayerCache.stats(),
-            embedding: semanticEmbeddingCache.stats(),
-            promptDedup: semanticPromptDedup.stats(),
-        });
-    });
-    route('POST', '/api/semantic-cache/normalize', async (req) => {
-        const data = await req.json();
-        const text = data.text || '';
-        if (!text) return error('text required', 400);
-        const normalized = normalizeRequest(text);
-        const key = computeSemanticKey(normalized, data.agent_id || '', data.channel_id || '', data.system_prompt || '');
-        return json({ normalized, cache_key: key });
-    });
-    route('POST', '/api/semantic-cache/lookup', async (req) => {
-        const data = await req.json();
-        const text = data.text || '';
-        if (!text) return error('text required', 400);
-        const lookup = semanticCacheLookup(text, data.agent_id || '', data.channel_id || '', data.system_prompt || '');
-        if (lookup.hit) {
-            return json({ hit: true, source: lookup.source, key: lookup.key, result: lookup.result, similarity: lookup.similarity || 1.0, normalized: lookup.normalized });
-        }
-        return json({ hit: false, key: lookup.key, normalized: lookup.normalized });
-    });
-    route('DELETE', '/api/semantic-cache/clear', () => {
-        semanticMultiLayerCache.clear();
-        semanticEmbeddingCache.clear();
-        semanticPromptDedup.clear();
-        return json({ ok: true, message: 'Semantic cache cleared' });
-    });
     // v5 Adaptive Orchestrator (default)
     route('POST', '/api/orchestrator/run', async (req, _match, env) => {
         try {
@@ -2006,58 +1479,35 @@ function extractKeywords(text) {
             await env.DB.prepare("CREATE TABLE IF NOT EXISTS collaboration_context (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT DEFAULT 'null', agent_id TEXT DEFAULT 'system', timestamp INTEGER DEFAULT 0)").run();
             const data = await req.json();
             const task = data.task || '';
-            const provider = data.provider || 'deepseek';
-            const model = data.model || 'deepseek-chat';
-            const adaptive = data.adaptive !== false; // default true
+            const provider = data.provider || 'openrouter';
+            const model = data.model || 'openrouter/auto';
             const forceMode = data.force_mode || null; // SIMPLE | STANDARD | COMPLEX
             const apiKeyRow = await env.DB.prepare('SELECT * FROM apikeys WHERE provider = ? LIMIT 1').bind(provider).first();
             if (!apiKeyRow || !apiKeyRow.api_key)
                 return error(`No API key for provider: ${provider}`, 400);
             let result;
-            if (adaptive) {
-                // v5: Adaptive orchestration — classifier decides mode
-                result = await runAdaptiveOrchestrator(task, apiKeyRow.api_key, provider, model, apiKeyRow.base_url, forceMode, env.DB);
-                return json({
-                    task_id: result.context.taskId,
-                    trace_id: result.trace[0]?.traceId || '',
-                    state: result.context.state,
-                    mode: result.context.mode,
-                    complexity: result.context.complexity,
-                    plan: result.context.plan,
-                    execution_result: result.context.executionResult,
-                    review_result: result.context.reviewResult,
-                    final_result: result.context.finalResult,
-                    llm_calls: result.context.llmCalls,
-                    skipped_stages: result.context.skippedStages,
-                    diversity_report: result.context.diversityReport || {},
-                    trace_length: result.trace.length,
-                });
-            }
-            else {
-                // v2 legacy: always full FSM
-                result = await runOrchestrator(task, '', apiKeyRow.api_key, provider, model, apiKeyRow.base_url, env.DB);
-                return json({
-                    task_id: result.context.taskId,
-                    trace_id: result.trace[0]?.traceId || '',
-                    state: result.context.state,
-                    intent: result.context.intent,
-                    plan: result.context.plan,
-                    dag_results: result.context.dagResults,
-                    review_result: result.context.reviewResult,
-                    final_result: result.context.finalResult,
-                    turn_count: result.context.turnCount,
-                    trace_length: result.trace.length,
-                    mode: 'LEGACY',
-                });
-            }
+            // v5: Adaptive orchestration — classifier decides mode
+            result = await runAdaptiveOrchestrator(task, apiKeyRow.api_key, provider, model, apiKeyRow.base_url, forceMode, env.DB);
+            return json({
+                task_id: result.context.taskId,
+                trace_id: result.trace[0]?.traceId || '',
+                state: result.context.state,
+                mode: result.context.mode,
+                complexity: result.context.complexity,
+                plan: result.context.plan,
+                execution_result: result.context.executionResult,
+                review_result: result.context.reviewResult,
+                final_result: result.context.finalResult,
+                llm_calls: result.context.llmCalls,
+                skipped_stages: result.context.skippedStages,
+                diversity_report: result.context.diversityReport || {},
+                trace_length: result.trace.length,
+            });
         }
         catch (e) {
             console.error('Orchestrator error:', e.message, e.stack);
             return json({ error: 'Orchestrator failed', detail: e.message }, 500);
         }
-    });
-    route('GET', '/api/orchestrator/state', async () => {
-        return json({ state: 'idle', message: 'Orchestrator is stateless on Workers.' });
     });
     // ═══════════════════════════════════════════════════════════
     // MAEOS — Multi-Agent Execution Operating System Routes
@@ -2068,7 +1518,7 @@ function extractKeywords(text) {
     const TASK_STATUSES = ['PENDING', 'SCHEDULED', 'RUNNING', 'COMPLETED', 'FAILED', 'RETRYING', 'ABORTED'];
     // Ensure maeos_tasks table exists
     async function ensureMAEOSTables(env) {
-        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS maeos_tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL, priority INTEGER DEFAULT 2, status TEXT DEFAULT 'PENDING', intent TEXT DEFAULT '', worker_id TEXT DEFAULT '', provider TEXT DEFAULT 'deepseek', model TEXT DEFAULT 'deepseek-chat', result TEXT DEFAULT '', error TEXT DEFAULT '', trace_report TEXT DEFAULT '{}', diversity_report TEXT DEFAULT '{}', context_json TEXT DEFAULT '{}', retry_count INTEGER DEFAULT 0, max_retries INTEGER DEFAULT 3, created_at REAL DEFAULT 0, scheduled_at REAL DEFAULT 0, started_at REAL DEFAULT 0, completed_at REAL DEFAULT 0)`).run();
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS maeos_tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL, priority INTEGER DEFAULT 2, status TEXT DEFAULT 'PENDING', intent TEXT DEFAULT '', worker_id TEXT DEFAULT '', provider TEXT DEFAULT 'openrouter', model TEXT DEFAULT 'openrouter/auto', result TEXT DEFAULT '', error TEXT DEFAULT '', trace_report TEXT DEFAULT '{}', diversity_report TEXT DEFAULT '{}', context_json TEXT DEFAULT '{}', retry_count INTEGER DEFAULT 0, max_retries INTEGER DEFAULT 3, created_at REAL DEFAULT 0, scheduled_at REAL DEFAULT 0, started_at REAL DEFAULT 0, completed_at REAL DEFAULT 0)`).run();
         // ── v2.5: Collaboration Layer Tables ──
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS collaboration_events (id TEXT PRIMARY KEY, event_type TEXT NOT NULL, source TEXT DEFAULT 'system', task_id TEXT NOT NULL, data TEXT DEFAULT '{}', timestamp INTEGER DEFAULT 0)").run();
         await env.DB.prepare("CREATE TABLE IF NOT EXISTS collaboration_context (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT DEFAULT 'null', agent_id TEXT DEFAULT 'system', timestamp INTEGER DEFAULT 0)").run();
@@ -2080,8 +1530,8 @@ function extractKeywords(text) {
             const data = await req.json();
             const taskId = `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
             const priority = data.priority ?? 2;
-            const provider = data.provider || 'deepseek';
-            const model = data.model || 'deepseek-chat';
+            const provider = data.provider || 'openrouter';
+            const model = data.model || 'openrouter/auto';
             const intent = data.intent || '';
             const now = Date.now() / 1000;
             // Get API key
@@ -2561,15 +2011,12 @@ async function handleRequest(request, env) {
     if (method === 'OPTIONS')
         return corsResponse();
     // ── Proxy Bypass: /p/* → /api/* ──
-    // School proxies block /api/* and /v1/* paths. /p/* looks like a page.
+    // School proxies block /api/* paths. /p/* looks like a page.
     // Also wraps JSON responses in text/html to bypass DPI.
     let realPathname = pathname;
     let isProxyPath = false;
-    if (pathname.startsWith('/p/api/')) {
-        realPathname = pathname.slice(3);  // /p/api/foo → /api/foo
-        isProxyPath = true;
-    } else if (pathname.startsWith('/p/v1/')) {
-        realPathname = pathname.slice(3);  // /p/v1/foo → /v1/foo
+    if (pathname.startsWith('/p/')) {
+        realPathname = '/api/' + pathname.slice(3);
         isProxyPath = true;
     }
     const matched = matchRoute(method, realPathname);
@@ -2600,153 +2047,297 @@ async function handleRequest(request, env) {
     return null;
 }
 
-// ═══════════════════════════════════════════════════════════
-// v2.1 Public API Layer — Unified Response Schema
-// ═══════════════════════════════════════════════════════════
-// Standard response wrapper for all /v1/* endpoints
-function v1Response(taskId, status, result, traceId, cost, latencyMs, message) {
-    return json({
-        task_id: taskId,
-        status,
-        result: result || '',
-        trace_id: traceId || '',
-        cost: cost || '$0',
-        latency: `${latencyMs}ms`,
-        message: message || '',
-    });
+function indexOf(bytes, pattern, start) {
+    for (let i = start; i <= bytes.length - pattern.length; i++) {
+        let found = true;
+        for (let j = 0; j < pattern.length; j++) {
+            if (bytes[i + j] !== pattern[j]) { found = false; break; }
+        }
+        if (found) return i;
+    }
+    return -1;
 }
-// GET /v1/health — Public health check (no auth)
-route('GET', '/v1/health', () => {
-    return v1Response('', 'ok', '', '', '$0', 0, 'AI Team Hub v2.1.0');
-});
-// POST /v1/task/run — Execute task with mode selection
-route('POST', '/v1/task/run', async (req, _match, env) => {
-    const start = Date.now();
-    try {
-        const data = await req.json();
-        const task = data.task || '';
-        const mode = data.mode || 'auto';
-        const provider = data.provider || 'openrouter';
-        const model = data.model || 'openrouter/owl-alpha';
-        const forceMode = (mode === 'control' && data.agent_config?.force_mode) ? data.agent_config.force_mode : null;
-        // Ensure tables
-        await env.DB.prepare("CREATE TABLE IF NOT EXISTS collaboration_events (id TEXT PRIMARY KEY, event_type TEXT NOT NULL, source TEXT DEFAULT 'system', task_id TEXT NOT NULL, data TEXT DEFAULT '{}', timestamp INTEGER DEFAULT 0)").run();
-        await env.DB.prepare("CREATE TABLE IF NOT EXISTS collaboration_context (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT DEFAULT 'null', agent_id TEXT DEFAULT 'system', timestamp INTEGER DEFAULT 0)").run();
-        // Get API key
-        const apiKeyRow = await env.DB.prepare('SELECT * FROM apikeys WHERE provider = ? LIMIT 1').bind(provider).first();
-        if (!apiKeyRow || !apiKeyRow.api_key)
-            return json({ task_id: '', status: 'error', result: '', trace_id: '', cost: '$0', latency: '0ms', message: `No API key for provider: ${provider}` }, 400);
-        // Execute
-        const result = await runAdaptiveOrchestrator(task, apiKeyRow.api_key, provider, model, apiKeyRow.base_url, forceMode, env.DB);
-        const elapsed = Date.now() - start;
-        const ctx = result.context;
-        const trace = result.trace;
-        const finalResult = ctx.finalResult || (typeof ctx.executionResult === 'object' ? ctx.executionResult?.result : '') || '';
-        return v1Response(ctx.taskId, ctx.state, finalResult, trace[0]?.traceId || '', '$0', elapsed, mode === 'debug' ? 'Debug mode: use /v1/task/{task_id}/trace for full details' : 'Task completed');
-    }
-    catch (e) {
-        return json({ task_id: '', status: 'error', result: '', trace_id: '', cost: '$0', latency: `${Date.now() - start}ms`, message: e.message }, 500);
-    }
-});
-// GET /v1/task/:id/status — Get task status
-route('GET', '/v1/task/:id/status', async (_req, match, env) => {
-    const start = Date.now();
-    const taskId = match[1];
-    try {
-        const row = await env.DB.prepare('SELECT * FROM maeos_tasks WHERE id = ?').bind(taskId).first();
-        if (row) {
-            return v1Response(taskId, row.status, row.result || '', '', '$0', Date.now() - start, 'Task status');
+
+function parseMultipart(arrayBuffer, boundary) {
+    const decoder = new TextDecoder('utf-8');
+    const bytes = new Uint8Array(arrayBuffer);
+    const boundaryBytes = new TextEncoder().encode('--' + boundary);
+    const parts = {};
+    let pos = 0;
+    while (pos < bytes.length) {
+        const idx = indexOf(bytes, boundaryBytes, pos);
+        if (idx === -1) break;
+        const partStart = idx + boundaryBytes.length;
+        let headerStart = partStart;
+        if (bytes[headerStart] === 0x0d) headerStart++;
+        if (bytes[headerStart] === 0x0a) headerStart++;
+        const headerEndIdx = indexOf(bytes, [0x0d, 0x0a, 0x0d, 0x0a], headerStart);
+        if (headerEndIdx === -1) break;
+        const headerStr = decoder.decode(bytes.slice(headerStart, headerEndIdx));
+        const nameMatch = headerStr.match(/name="([^"]+)"/);
+        const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+        const mimeMatch = headerStr.match(/Content-Type:\s*([^\r\n]+)/i);
+        if (!nameMatch) break;
+        const name = nameMatch[1];
+        let dataStart = headerEndIdx + 4;
+        const nextIdx = indexOf(bytes, boundaryBytes, dataStart);
+        if (nextIdx === -1) break;
+        let dataEnd = nextIdx;
+        if (bytes[dataEnd - 1] === 0x0a) dataEnd--;
+        if (bytes[dataEnd - 1] === 0x0d) dataEnd--;
+        const data = bytes.slice(dataStart, dataEnd);
+        if (filenameMatch) {
+            parts[name] = { filename: filenameMatch[1], mime: mimeMatch ? mimeMatch[1].trim() : 'application/octet-stream', data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) };
+        } else {
+            parts[name] = decoder.decode(data);
         }
-        return v1Response(taskId, 'not_found', '', '', '$0', Date.now() - start, 'Task not found');
+        pos = nextIdx;
     }
-    catch (e) {
-        return v1Response(taskId, 'error', '', '', '$0', Date.now() - start, e.message);
+    return parts;
+}
+
+// ═══════════════════════════════════════════════════════════
+// RAG Embedding Engine (v2.1)
+// ═══════════════════════════════════════════════════════════
+
+const EMBED_DIM = 384;
+
+function md5Hex(str) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
     }
-});
-// GET /v1/task/:id/trace — Get execution trace
-route('GET', '/v1/task/:id/trace', async (_req, match, env) => {
-    const start = Date.now();
-    const taskId = match[1];
-    try {
-        const row = await env.DB.prepare('SELECT * FROM maeos_tasks WHERE id = ?').bind(taskId).first();
-        if (row) {
-            const traceReport = JSON.parse(row.trace_report || '[]');
-            const steps = traceReport.map(ev => ({
-                step: ev.step || '',
-                agent: ev.agent || '',
-                latency_ms: ev.latencyMs || 0,
-            }));
-            const fsmTransitions = traceReport.filter(e => e.step?.startsWith('fsm_') || e.step === 'COMPLETE').map(e => ({
-                from: e.step.replace('fsm_', ''),
-                to: e.step === 'COMPLETE' ? 'DONE' : e.step.replace('fsm_', ''),
-            }));
-            return json({
-                trace_id: row.id,
-                task_id: taskId,
-                status: row.status,
-                steps,
-                fsm_transitions: fsmTransitions,
-                agent_calls: traceReport.filter(e => e.agent && e.agent !== 'system').map(e => ({
-                    agent: e.agent,
-                    input_preview: (e.inputData?.task || '').slice(0, 100),
-                    output_preview: (e.outputData?.result || '').slice(0, 200),
-                    latency_ms: e.latencyMs || 0,
-                })),
-                cache_hits: 0,
-                total_cost: '$0',
-                total_latency: `${Date.now() - start}ms`,
-                message: 'Trace retrieved',
-            });
+    const hex1 = (h1 >>> 0).toString(16).padStart(8, '0');
+    const hex2 = (h2 >>> 0).toString(16).padStart(8, '0');
+    return (hex1 + hex2 + hex1 + hex2 + hex1 + hex2 + hex1 + hex2).substr(0, 32);
+}
+
+function _hashToken(token, dim) {
+    const vec = new Array(dim).fill(0);
+    for (let seed = 0; seed < 4; seed++) {
+        const h = md5Hex(seed + ':' + token);
+        for (let i = 0; i < h.length; i += 2) {
+            const idx = parseInt(h.substr(i, 2), 16) % dim;
+            const val = parseInt(h[i], 16) < 8 ? 1.0 : -1.0;
+            vec[idx] += val;
         }
-        return json({ trace_id: '', task_id: taskId, status: 'not_found', steps: [], fsm_transitions: [], agent_calls: [], cache_hits: 0, total_cost: '$0', total_latency: '0ms', message: 'No trace found' });
     }
-    catch (e) {
-        return json({ trace_id: '', task_id: taskId, status: 'error', steps: [], fsm_transitions: [], agent_calls: [], cache_hits: 0, total_cost: '$0', total_latency: '0ms', message: e.message });
+    return vec;
+}
+
+function embedText(text, dim = EMBED_DIM) {
+    if (!text || !text.trim()) return new Array(dim).fill(0);
+    const tokens = text.toLowerCase().match(/[一-鿿]|[a-z0-9]+/g) || [];
+    if (tokens.length === 0) return new Array(dim).fill(0);
+    const vec = new Array(dim).fill(0);
+    const counts = {};
+    for (const t of tokens) counts[t] = (counts[t] || 0) + 1;
+    for (const [token, count] of Object.entries(counts)) {
+        const tv = _hashToken(token, dim);
+        const w = 1.0 + Math.log(count + 1);
+        for (let i = 0; i < dim; i++) vec[i] += tv[i] * w;
     }
-});
-// POST /v1/workspace/create — Create workspace
-route('POST', '/v1/workspace/create', async (req, _match, env) => {
-    const start = Date.now();
+    let norm = 0;
+    for (const v of vec) norm += v * v;
+    norm = Math.sqrt(norm);
+    if (norm > 0) for (let i = 0; i < dim; i++) vec[i] /= norm;
+    return vec;
+}
+
+function cosineSim(a, b) {
+    if (a.length !== b.length) return 0;
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+    return (na === 0 || nb === 0) ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function chunkText(text, chunkSize = 500, overlapPct = 0.2) {
+    if (!text.trim()) return [];
+    const paras = text.includes('\n\n') ? text.split('\n\n').map(s=>s.trim()).filter(Boolean) : text.split(/(?<=[。！？.!?])\s*/g).filter(s=>s.trim());
+    const chunks = []; let cur = ''; let idx = 0;
+    for (const p of paras) {
+        if (p.length > chunkSize) {
+            if (cur) { chunks.push({content:cur.trim(),index:idx++}); cur = cur.slice(-Math.floor(cur.length*overlapPct)); }
+            const sents = p.split(/(?<=[。！？.!?])\s*/g).filter(s=>s.trim());
+            for (const s of sents) {
+                if (cur.length+s.length+1>chunkSize&&cur) { chunks.push({content:cur.trim(),index:idx++}); cur = cur.slice(-Math.floor(cur.length*overlapPct)); }
+                cur += (cur?' ':'')+s;
+            }
+            continue;
+        }
+        if (cur.length+p.length+2>chunkSize&&cur) { chunks.push({content:cur.trim(),index:idx++}); cur = cur.slice(-Math.floor(cur.length*overlapPct)); }
+        cur += (cur?'\n\n':'')+p;
+    }
+    if (cur.trim()) chunks.push({content:cur.trim(),index:idx});
+    return chunks;
+}
+
+function extractText(bytes, ext) {
+    return new TextDecoder('utf-8').decode(bytes);
+}
+
+// ── RAG Routes ──
+
+// POST /v1/files/upload
+route('POST', '/v1/files/upload', async (req, _match, env) => {
     try {
-        const data = await req.json();
-        const id = genUUID();
+        const ct = req.headers.get('content-type') || '';
+        if (!ct.includes('multipart/form-data')) return error('Expected multipart/form-data', 400);
+        const boundary = ct.split('boundary=')[1];
+        if (!boundary) return error('Missing boundary', 400);
+        const userId = req.headers.get('X-User-ID') || 'anonymous';
+        const raw = await req.arrayBuffer();
+        const parts = parseMultipart(raw, boundary);
+        if (!parts.file) return error('No file field', 400);
+        const fileBytes = new Uint8Array(parts.file.data);
+        const fileName = parts.file.filename || 'unknown';
+        const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+        if (!['pdf','docx','txt','md'].includes(ext)) return error('Unsupported type: '+ext, 400);
+        if (fileBytes.length > 5*1024*1024) return error('File too large', 413);
+        const fileId = genUUID();
         const now = utcNow();
-        await env.DB.prepare('INSERT INTO channels (id, name, description, created_at, updated_at, teammate_ids) VALUES (?, ?, ?, ?, ?, ?)').bind(id, data.title || 'Untitled', data.description || '', now, now, '[]').run();
-        return json({ workspace_id: id, status: 'created', title: data.title || 'Untitled', created_at: now, latency: `${Date.now() - start}ms`, message: 'Workspace created' });
-    }
-    catch (e) {
-        return json({ workspace_id: '', status: 'error', title: '', created_at: '', latency: '0ms', message: e.message }, 500);
-    }
+        let rawText = extractText(fileBytes, ext) || '';
+        if (!rawText.trim()) {
+            await env.DB.prepare('INSERT INTO file_uploads (id,filename,file_type,size,user_id,status,error_message,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+                .bind(fileId,fileName,ext,String(fileBytes.length),userId,'error','No text extracted',now,now).run();
+            return error('Could not extract text', 422);
+        }
+        const chunks = chunkText(rawText);
+        await env.DB.prepare('INSERT INTO file_uploads (id,filename,file_type,size,user_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)')
+            .bind(fileId,fileName,ext,String(fileBytes.length),userId,'ready',now,now).run();
+        for (let i = 0; i < chunks.length; i++) {
+            const emb = embedText(chunks[i].content);
+            const chunkId = genUUID();
+            await env.DB.prepare('INSERT INTO file_chunks (id,file_id,content,"index",embedding,created_at) VALUES (?,?,?,?,?,?)')
+                .bind(chunkId,fileId,chunks[i].content,String(i),JSON.stringify(emb),now).run();
+        }
+        return json({file_id:fileId,filename:fileName,file_type:ext,size:fileBytes.length,user_id:userId,status:'ready',chunk_count:chunks.length,message:'File uploaded, '+chunks.length+' chunks created'}, 201);
+    } catch(e) { return json({error:e.message}, 500); }
 });
-// POST /v1/agent/chat — Simple one-shot chat
-route('POST', '/v1/agent/chat', async (req, _match, env) => {
-    const start = Date.now();
+
+// POST /v1/files/query
+route('POST', '/v1/files/query', async (req, _match, env) => {
     try {
+        const data = await req.json();
+        const query = data.query || '';
+        const topK = Math.min(data.top_k || 5, 50);
+        const fileId = data.file_id || null;
+        const userId = req.headers.get('X-User-ID') || 'anonymous';
+        if (!query.trim()) return error('Query required', 400);
+        let rows;
+        if (fileId) {
+            rows = await env.DB.prepare('SELECT fc.id, fc.file_id, fc.content, fc."index", fu.user_id, fc.embedding FROM file_chunks fc JOIN file_uploads fu ON fc.file_id = fu.id WHERE fc.file_id = ? AND fu.user_id = ?').bind(fileId, userId).all();
+        } else {
+            rows = await env.DB.prepare('SELECT fc.id, fc.file_id, fc.content, fc."index", fu.user_id, fc.embedding FROM file_chunks fc JOIN file_uploads fu ON fc.file_id = fu.id WHERE fu.user_id = ?').bind(userId).all();
+        }
+        const qEmb = embedText(query);
+        const results = [];
+        for (const row of (rows.results||[])) {
+            if (!row.embedding) continue;
+            const chunkEmb = JSON.parse(row.embedding);
+            const score = cosineSim(qEmb, chunkEmb);
+            results.push({chunk_id:row.id,file_id:row.file_id,content:row.content,score:Math.round(score*10000)/10000,index:parseInt(row.index)||0});
+        }
+        results.sort((a,b)=>b.score-a.score);
+        return json({results:results.slice(0,topK),query,total_found:results.length,latency_ms:Date.now()-0});
+    } catch(e) { return json({error:e.message, stack:e.stack}, 500); }
+});
+
+// POST /v1/files/context
+route('POST', '/v1/files/context', async (req, _match, env) => {
+    try {
+        const data = await req.json();
+        const query = data.query || '';
+        const topK = Math.min(data.top_k || 3, 10);
+        const userId = req.headers.get('X-User-ID') || 'anonymous';
+        if (!query.trim()) return error('Query required', 400);
+        const rows = await env.DB.prepare('SELECT fc.id, fc.file_id, fc.content, fc."index", fu.user_id, fc.embedding FROM file_chunks fc JOIN file_uploads fu ON fc.file_id = fu.id WHERE fu.user_id = ?').bind(userId).all();
+        const qEmb = embedText(query);
+        const results = [];
+        for (const row of (rows.results||[])) {
+            if (!row.embedding) continue;
+            results.push({chunk_id:row.id,file_id:row.file_id,content:row.content,score:Math.round(cosineSim(qEmb,JSON.parse(row.embedding))*10000)/10000});
+        }
+        results.sort((a,b)=>b.score-a.score);
+        const top = results.slice(0,topK);
+        const ctx = top.map((r,i)=>'[Source '+(i+1)+'] '+r.content).join('\n\n');
+        return json({context:ctx,sources:top.map(r=>({file_id:r.file_id,chunk_id:r.chunk_id,score:r.score})),query,token_count:Math.ceil(ctx.length/3)});
+    } catch(e) { return json({error:e.message}, 500); }
+});
+
+// GET /v1/files
+route('GET', '/v1/files', async (req, _match, env) => {
+    const userId = req.headers.get('X-User-ID') || 'anonymous';
+    const rows = await env.DB.prepare('SELECT id,filename,file_type,size,status,created_at FROM file_uploads WHERE user_id=? ORDER BY created_at DESC').bind(userId).all();
+    return json({files:rows.results||[],total:(rows.results||[]).length});
+});
+
+// GET /v1/files/:id
+route('GET', '/v1/files/:id', async (req, match, env) => {
+    const fileId = match[1];
+    const userId = req.headers.get('X-User-ID') || 'anonymous';
+    const f = await env.DB.prepare('SELECT * FROM file_uploads WHERE id=? AND user_id=?').bind(fileId,userId).first();
+    if (!f) return error('File not found', 404);
+    const chunks = await env.DB.prepare('SELECT id,"index",substr(content,1,100) as preview FROM file_chunks WHERE file_id=? ORDER BY "index"').bind(fileId).all();
+    return json({file_id:f.id,filename:f.filename,file_type:f.file_type,size:parseInt(f.size),user_id:f.user_id,status:f.status,chunk_count:(chunks.results||[]).length,chunks:chunks.results||[],created_at:f.created_at});
+});
+
+// DELETE /v1/files/:id
+route('DELETE', '/v1/files/:id', async (req, match, env) => {
+    const fileId = match[1];
+    const userId = req.headers.get('X-User-ID') || 'anonymous';
+    const f = await env.DB.prepare('SELECT id FROM file_uploads WHERE id=? AND user_id=?').bind(fileId,userId).first();
+    if (!f) return error('File not found', 404);
+    await env.DB.prepare('DELETE FROM file_chunks WHERE file_id=?').bind(fileId).run();
+    await env.DB.prepare('DELETE FROM file_uploads WHERE id=?').bind(fileId).run();
+    return json({status:'ok',file_id:fileId});
+});
+
+// POST /v1/agent/chat-with-files
+route('POST', '/v1/agent/chat-with-files', async (req, _match, env) => {
+    try {
+        const start = Date.now();
         const data = await req.json();
         const message = data.message || '';
+        const topK = Math.min(data.top_k || 3, 10);
+        const fileId = data.file_id || null;
+        const userId = req.headers.get('X-User-ID') || 'anonymous';
+        if (!message.trim()) return error('Message required', 400);
+        let ctx = '', sources = [], used = false;
+        let rows;
+        if (fileId) {
+            rows = await env.DB.prepare('SELECT fc.id,fc.file_id,fc.content,fc."index",fu.user_id,fc.embedding FROM file_chunks fc JOIN file_uploads fu ON fc.file_id=fu.id WHERE fc.file_id=? AND fu.user_id=?').bind(fileId,userId).all();
+        } else {
+            rows = await env.DB.prepare('SELECT fc.id,fc.file_id,fc.content,fc."index",fu.user_id,fc.embedding FROM file_chunks fc JOIN file_uploads fu ON fc.file_id=fu.id WHERE fu.user_id=?').bind(userId).all();
+        }
+        if (rows.results && rows.results.length > 0) {
+            const qEmb = embedText(message);
+            const scored = [];
+            for (const row of rows.results) {
+                if (!row.embedding) continue;
+                scored.push({chunk_id:row.id,file_id:row.file_id,content:row.content,score:Math.round(cosineSim(qEmb,JSON.parse(row.embedding))*10000)/10000});
+            }
+            scored.sort((a,b)=>b.score-a.score);
+            const top = scored.slice(0,topK);
+            if (top.length > 0) {
+                ctx = top.map((r,i)=>'[Source '+(i+1)+'] '+r.content).join('\n\n');
+                sources = top.map(r=>({file_id:r.file_id,chunk_id:r.chunk_id,score:r.score}));
+                used = true;
+            }
+        }
+        let prompt = message;
+        if (ctx) prompt = 'CONTEXT:\n'+ctx+'\n\nQUESTION:\n'+message+'\n\nBased on the context above, provide a helpful answer.';
         const provider = data.provider || 'openrouter';
-        const model = data.model || 'openrouter/owl-alpha';
-        const apiKeyRow = await env.DB.prepare('SELECT * FROM apikeys WHERE provider = ? LIMIT 1').bind(provider).first();
-        if (!apiKeyRow || !apiKeyRow.api_key)
-            return json({ session_id: '', status: 'error', response: '', agent_used: '', latency: '0ms', message: `No API key for provider: ${provider}` }, 400);
-        const r = await callAgent('executor', { task: message, roleContext: `消息：${message}`, expectedOutput: '直接回答' }, apiKeyRow.api_key, provider, model, apiKeyRow.base_url);
-        const elapsed = Date.now() - start;
-        return json({ session_id: crypto.randomUUID().slice(0, 8), status: r.status === 'success' ? 'ok' : 'error', response: r.result || r.error || '', agent_used: 'executor', latency: `${elapsed}ms`, message: r.status === 'success' ? 'Chat completed' : 'Chat failed' });
-    }
-    catch (e) {
-        return json({ session_id: '', status: 'error', response: '', agent_used: '', latency: `${Date.now() - start}ms`, message: e.message }, 500);
-    }
+        const model = data.model || 'openrouter/auto';
+        const apiKeyRow = await env.DB.prepare('SELECT * FROM apikeys WHERE provider=? LIMIT 1').bind(provider).first();
+        if (!apiKeyRow) return error('No API key for '+provider, 401);
+        const r = await callAgent('executor',{task:prompt,roleContext:'User question with file context',expectedOutput:'Answer based on context'},apiKeyRow.api_key,provider,model,apiKeyRow.base_url);
+        return json({session_id:crypto.randomUUID().slice(0,8),status:r.status==='success'?'ok':'error',response:r.result||r.error||'',context_used:used,sources,latency:Date.now()-start+'ms',message:used?'RAG context retrieved':'No file context found'});
+    } catch(e) { return json({error:e.message}, 500); }
 });
-// GET /v1/system/modes — Available modes
-route('GET', '/v1/system/modes', () => {
-    return json({
-        modes: [
-            { name: 'auto', description: 'Full FSM + agent pipeline + cache (recommended)', features: ['fsm_routing', 'agent_planning', 'execution', 'review', 'cache'], complexity: 'high' },
-            { name: 'control', description: 'User overrides agent behavior via agent_config', features: ['custom_agent', 'overridable_pipeline'], complexity: 'medium' },
-            { name: 'debug', description: 'Full visibility into FSM states, traces, and internals', features: ['full_trace', 'fsm_state_dump', 'agent_logs', 'cost_breakdown'], complexity: 'high' },
-        ],
-    });
-});
+
 // ═══════════════════════════════════════════════════════════
 
 // Cloudflare Workers — ES Module format
@@ -2756,6 +2347,7 @@ export default {
         // If Worker returned a route match, use it
         if (result) return result;
         // Otherwise, fall through to static assets (frontend)
-        return env.ASSETS.fetch(request);
+        if (env.ASSETS) return env.ASSETS.fetch(request);
+        return new Response('Not Found', { status: 404 });
     }
 };

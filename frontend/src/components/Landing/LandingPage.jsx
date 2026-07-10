@@ -5,7 +5,7 @@ import CapabilitiesSection from './CapabilitiesSection';
 import ContactSection from './ContactSection';
 import Navbar from './Navbar';
 
-export default function LandingPage({ onEnterApp }) {
+export default function LandingPage({ onEnterApp, lang, changeLang }) {
   const handleScrollDown = () => {
     const el = document.getElementById('features');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -13,7 +13,7 @@ export default function LandingPage({ onEnterApp }) {
 
   return (
     <div style={{ background: '#000000', color: '#ffffff', minHeight: '100vh' }}>
-      <Navbar onEnterApp={onEnterApp} />
+      <Navbar onEnterApp={onEnterApp} lang={lang} changeLang={changeLang} />
 
       <main>
         <HeroSection onScrollDown={handleScrollDown} />

@@ -8,7 +8,7 @@ Controls:
   - retry scheduling (delegates to RetryPolicy)
   - concurrency control (asyncio.Semaphore)
 
-RULE: Orchestrator MUST NOT directly call agents.
+RULE: Team engine MUST NOT directly call teammates.
       All execution MUST go through Scheduler.
 """
 
@@ -39,9 +39,9 @@ class ExecStatus(str, Enum):
 class ExecUnit:
     """A single schedulable execution unit."""
     id: str
-    agent_id: str
+    teammate_id: str
     state: str              # FSM state that triggered this execution
-    fn: Callable[..., Awaitable[Any]]  # agent function to call
+    fn: Callable[..., Awaitable[Any]]  # teammate function to call
     kwargs: dict = field(default_factory=dict)
     status: str = ExecStatus.PENDING
     attempt: int = 0
@@ -68,11 +68,11 @@ class ExecUnit:
 
 class Scheduler:
     """
-    Execution scheduler — single point of dispatch for all agent calls.
+    Execution scheduler — single point of dispatch for all teammate calls.
 
     Usage:
         scheduler = Scheduler(max_concurrency=1)
-        unit = scheduler.submit(agent_fn, agent_id="planner", state="PLAN", kwargs={...})
+        unit = scheduler.submit(teammate_fn, teammate_id="strategy", state="PLAN", kwargs={...})
         result = await scheduler.execute(unit)
     """
 
@@ -86,21 +86,21 @@ class Scheduler:
     def submit(
         self,
         fn: Callable[..., Awaitable[Any]],
-        agent_id: str,
+        teammate_id: str,
         state: str,
         kwargs: dict = None,
         max_attempts: int = 3,
     ) -> ExecUnit:
         """Submit an execution unit to the queue."""
         unit = ExecUnit(
-            id=f"exec_{int(time.time()*1000)}_{agent_id}",
-            agent_id=agent_id,
+            id=f"exec_{int(time.time()*1000)}_{teammate_id}",
+            teammate_id=teammate_id,
             state=state,
             fn=fn,
             kwargs=kwargs or {},
             max_attempts=max_attempts,
         )
-        logger.info(f"[SCHEDULER] submit {unit.id} agent={agent_id} state={state}")
+        logger.info(f"[SCHEDULER] submit {unit.id} teammate={teammate_id} state={state}")
         return unit
 
     async def execute(self, unit: ExecUnit) -> ExecUnit:
@@ -115,7 +115,7 @@ class Scheduler:
 
             logger.info(
                 f"[SCHEDULER] execute {unit.id} "
-                f"agent={unit.agent_id} attempt={unit.attempt}/{unit.max_attempts}"
+                f"teammate={unit.teammate_id} attempt={unit.attempt}/{unit.max_attempts}"
             )
 
             try:

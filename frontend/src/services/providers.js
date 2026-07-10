@@ -6,17 +6,16 @@
 // ── 静态 fallback 列表（当 API 不可用时使用）──
 const STATIC_MODELS = {
   deepseek: [
-    'deepseek-chat', 'deepseek-reasoner', 'deepseek-v3', 'deepseek-r1',
-    'deepseek-v2.5', 'deepseek-coder-v2', 'deepseek-v2', 'deepseek-coder',
-    'deepseek-math', 'deepseek-moe-16b',
+    'deepseek-chat', 'deepseek-reasoner', 'deepseek-v3.1', 'deepseek-v3',
+    'deepseek-r1-0528', 'deepseek-r1', 'deepseek-coder-v2',
   ],
   zhipu: [
     'glm-4-plus', 'glm-4-air', 'glm-4-airx', 'glm-4-flash', 'glm-4-long',
     'glm-4-flashx', 'glm-4v', 'glm-4v-plus', 'glm-4', 'glm-3-turbo', 'codegeex-4',
   ],
   moonshot: [
+    'kimi-k2.5', 'kimi-k2-0711-preview', 'kimi-k2-instruct',
     'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k',
-    'kimi-k2-0711-preview', 'kimi-k2-instruct',
   ],
   baidu: [
     'ernie-4.5-8k-preview', 'ernie-4.5', 'ernie-4.0-8k', 'ernie-4.0-8k-preview',
@@ -24,21 +23,19 @@ const STATIC_MODELS = {
     'ernie-speed-8k', 'ernie-speed-128k', 'ernie-lite-8k', 'ernie-char-8k', 'ernie-novel-8k',
   ],
   alibaba: [
-    'qwen-max', 'qwen-max-latest', 'qwen-plus', 'qwen-plus-latest',
-    'qwen-turbo', 'qwen-turbo-latest', 'qwen-long',
-    'qwen-coder-plus', 'qwen-coder-turbo', 'qwen-vl-max', 'qwen-vl-plus', 'qwen-omni-turbo',
+    'qwen-max-latest', 'qwen-plus-latest', 'qwen-turbo-latest', 'qwen-long',
+    'qwen3-coder-plus', 'qwen3-235b-a22b-instruct', 'qwen3-30b-a3b', 'qwen3-32b',
+    'qwen3-14b', 'qwen3-8b', 'qwen3-4b', 'qwen3-1.7b', 'qwen3-0.6b',
     'qwen2.5-72b-instruct', 'qwen2.5-32b-instruct', 'qwen2.5-14b-instruct', 'qwen2.5-7b-instruct',
-    'qwen2.5-3b-instruct', 'qwen2.5-1.5b-instruct',
-    'qwen2-72b-instruct', 'qwen2-7b-instruct', 'qwen2-57b-a14b-instruct',
-    'qwen2-1.5b-instruct', 'qwen2-0.5b-instruct',
-    'qwq-32b-preview', 'qwq-32b',
-    'qwen3-235b-a22b', 'qwen3-30b-a3b', 'qwen3-32b', 'qwen3-14b', 'qwen3-8b',
-    'qwen3-4b', 'qwen3-1.7b', 'qwen3-0.6b',
+    'qwen2.5-coder-32b-instruct', 'qwen2.5-coder-7b-instruct',
+    'qwq-32b',
+    'qwen-vl-max', 'qwen-vl-plus', 'qwen-omni-turbo',
   ],
   doubao: [
+    'doubao-seed-1-6-250615', 'doubao-seed-1-6', 'doubao-pro-32k-0528',
     'doubao-pro-128k', 'doubao-pro-32k', 'doubao-pro-4k',
     'doubao-lite-128k', 'doubao-lite-32k', 'doubao-lite-4k',
-    'doubao-embedding', 'doubao-embedding-large',
+    'doubao-embedding-large',
   ],
   hunyuan: [
     'hunyuan-turbo', 'hunyuan-turbo-latest', 'hunyuan-pro',
@@ -58,8 +55,8 @@ const STATIC_MODELS = {
     'yi-1.5-34b-chat', 'yi-1.5-9b-chat', 'yi-1.5-6b-chat',
   ],
   minimax: [
-    'minimax-text-01', 'MiniMax-Text-01', 'abab7-chat',
-    'abab6.5s-chat', 'abab6.5-chat', 'abab6.5t-chat', 'abab5.5s-chat', 'abab5.5-chat',
+    'MiniMax-M1', 'minimax-text-01', 'MiniMax-Text-01',
+    'abab7-chat', 'abab6.5s-chat', 'abab6.5-chat',
   ],
   stepfun: [
     'step-1-256k', 'step-1-128k', 'step-1-32k', 'step-1-8k',
@@ -75,65 +72,46 @@ const STATIC_MODELS = {
   ],
   siliconflow: [
     'Qwen/Qwen3-235B-A22B', 'Qwen/Qwen3-30B-A3B', 'Qwen/Qwen3-32B', 'Qwen/Qwen3-14B', 'Qwen/Qwen3-8B',
-    'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen2.5-32B-Instruct', 'Qwen/Qwen2.5-14B-Instruct', 'Qwen/Qwen2.5-7B-Instruct',
+    'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen2.5-32B-Instruct', 'Qwen/Qwen2.5-7B-Instruct',
     'Qwen/Qwen2.5-Coder-32B-Instruct', 'Qwen/Qwen2.5-Coder-7B-Instruct',
-    'Qwen/QwQ-32B', 'Qwen/QwQ-32B-Preview',
-    'Qwen/Qwen2-72B-Instruct', 'Qwen/Qwen2-7B-Instruct',
-    'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'deepseek-ai/DeepSeek-R1-0528',
-    'deepseek-ai/DeepSeek-V2.5', 'deepseek-ai/DeepSeek-Coder-V2-Instruct',
-    'THUDM/glm-4-9b-chat', 'THUDM/GLM-4-9B-Chat-1M',
-    'meta-llama/Meta-Llama-3.1-70B-Instruct', 'meta-llama/Meta-Llama-3.1-8B-Instruct',
-    'meta-llama/Meta-Llama-3-70B-Instruct', 'meta-llama/Meta-Llama-3-8B-Instruct',
-    'meta-llama/Llama-3.2-3B-Instruct', 'meta-llama/Llama-3.2-1B-Instruct',
-    'meta-llama/Llama-3.3-70B-Instruct',
-    'google/gemma-2-27b-it', 'google/gemma-2-9b-it', 'google/gemma-2-2b-it',
+    'deepseek-ai/DeepSeek-V3.1', 'deepseek-ai/DeepSeek-R1-0528', 'deepseek-ai/DeepSeek-R1',
+    'deepseek-ai/DeepSeek-V3',
+    'THUDM/GLM-4-9B-Chat-1M',
+    'meta-llama/Llama-3.3-70B-Instruct', 'meta-llama/Llama-3.1-8B-Instruct',
+    'meta-llama/Llama-3.2-3B-Instruct',
+    'google/gemma-2-27b-it', 'google/gemma-2-9b-it',
   ],
   openai: [
-    'gpt-4o', 'gpt-4o-mini', 'gpt-4o-2024-11-20', 'gpt-4o-2024-08-06', 'gpt-4o-2024-05-13',
-    'gpt-4o-realtime-preview', 'gpt-4o-mini-realtime-preview', 'gpt-4o-audio-preview',
-    'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-4-turbo-preview',
-    'gpt-4', 'gpt-4-0613', 'gpt-4-32k',
-    'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106',
-    'o1', 'o1-preview', 'o1-mini', 'o3', 'o3-mini', 'o3-pro', 'o4-mini',
+    'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
     'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+    'gpt-4o', 'gpt-4o-mini', 'gpt-4o-2024-11-20', 'gpt-4o-2024-08-06',
+    'o1', 'o1-preview', 'o1-mini', 'o3', 'o3-mini', 'o3-pro', 'o4-mini',
+    'gpt-4-turbo', 'gpt-4',
   ],
   anthropic: [
-    'claude-opus-4-20250514', 'claude-opus-4-20250514-thinking',
+    'claude-opus-4-5', 'claude-opus-4-20250514', 'claude-opus-4-20250514-thinking',
     'claude-sonnet-4-20250514', 'claude-sonnet-4-20250514-thinking',
+    'claude-3.7-sonnet-20250219',
     'claude-haiku-4-20250514',
-    'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-20240620',
-    'claude-3-5-haiku-20241022',
-    'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307',
-    'claude-2.1', 'claude-2.0',
+    'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022',
   ],
   google: [
-    'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash-preview-05-20',
-    'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.0-flash-001',
-    'gemini-2.0-flash-exp', 'gemini-2.0-flash-thinking-exp', 'gemini-2.0-flash-live-preview',
-    'gemini-2.0-pro-exp',
-    'gemini-1.5-pro', 'gemini-1.5-pro-002', 'gemini-1.5-pro-001',
-    'gemini-1.5-flash', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001', 'gemini-1.5-flash-8b',
-    'gemini-1.0-pro',
+    'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash-image-preview',
+    'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+    'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.5-flash-8b',
   ],
   mistral: [
-    'mistral-large-latest', 'mistral-large-2411', 'mistral-large-2407',
-    'mistral-small-latest', 'mistral-small-2501', 'mistral-small-2409',
-    'pixtral-large-latest', 'pixtral-large-2411', 'pixtral-12b', 'pixtral-12b-2409',
-    'codestral-latest', 'codestral-2501', 'codestral-2411',
+    'mistral-large-latest', 'mistral-small-latest',
+    'pixtral-large-latest', 'pixtral-12b',
+    'codestral-latest',
     'ministral-8b-latest', 'ministral-3b-latest',
-    'open-mistral-nemo', 'open-mistral-nemo-2407',
-    'open-mixtral-8x7b', 'open-mixtral-8x22b',
-    'mathstral-7b-v0.1', 'mistral-embed',
+    'open-mistral-nemo', 'mistral-embed',
   ],
   groq: [
-    'llama-3.3-70b-versatile', 'llama-3.3-70b-specdec',
-    'llama-3.1-8b-instant', 'llama-3.1-70b-versatile',
-    'llama-3.2-3b-preview', 'llama-3.2-1b-preview',
-    'llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview',
-    'llama-3.1-405b-reasoning', 'llama-guard-3-8b',
-    'mixtral-8x7b-32768', 'gemma-7b-it', 'gemma2-9b-it',
+    'llama-3.3-70b-versatile', 'llama-3.1-8b-instant',
+    'llama-3.2-3b-preview', 'llama-3.2-11b-vision-preview',
     'qwen-2.5-32b', 'deepseek-r1-distill-llama-70b',
-    'llama3-70b-8192', 'llama3-8b-8192', 'llama2-70b-4096',
+    'gemma2-9b-it',
   ],
   together: [
     'meta-llama/Meta-Llama-3.1-70B-Instruct', 'meta-llama/Meta-Llama-3.1-8B-Instruct',
@@ -149,8 +127,29 @@ const STATIC_MODELS = {
     'google/gemma-2-27b-it', 'google/gemma-2-9b-it', 'google/gemma-7b-it',
   ],
   openrouter: [],  // OpenRouter 总是动态加载
+  opencode: [
+    'claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5',
+    'claude-opus-4-1', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-sonnet-4',
+    'claude-haiku-4-5', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash',
+    'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano',
+    'gpt-5.3-codex-spark', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1',
+    'gpt-5.1-codex-max', 'gpt-5.1-codex', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano',
+    'grok-build-0.1', 'deepseek-v4-pro', 'deepseek-v4-flash',
+    'glm-5.2', 'glm-5.1', 'glm-5', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5',
+    'kimi-k2.7-code', 'kimi-k2.6', 'kimi-k2.5', 'qwen3.6-plus', 'qwen3.5-plus',
+    'big-pickle', 'deepseek-v4-flash-free', 'mimo-v2.5-free', 'nemotron-3-ultra-free', 'north-mini-code-free',
+  ],
   custom: ['输入任意 OpenAI 兼容模型名'],
 };
+
+// ── 免费模型标记 ──
+// 某些 provider 的 API 不返回 is_free 字段，手动标记
+const FREE_MODELS = new Set([
+  'deepseek-v4-flash-free',
+  'mimo-v2.5-free',
+  'nemotron-3-ultra-free',
+  'north-mini-code-free',
+]);
 
 // ── Provider 元数据 ──
 const PROVIDER_META = [
@@ -176,12 +175,34 @@ const PROVIDER_META = [
   { id: 'groq',        name: 'Groq',                   region: 'overseas' },
   { id: 'together',    name: 'Together AI',            region: 'overseas' },
   { id: 'openrouter',  name: 'OpenRouter',             region: 'overseas' },
+  { id: 'opencode',    name: 'OpenCode Zen',           region: 'overseas' },
   { id: 'custom',      name: '自定义 (Custom)',        region: 'overseas' },
 ];
 
 // ── 动态模型缓存 ──
 const _modelCache = {};
+const _allModelsCache = { models: null, ts: 0 };
 const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+const ALL_CACHE_TTL = 10 * 60 * 1000; // 10 分钟
+
+// ── 从后端获取所有模型（自动更新）──
+async function _ensureAllModels() {
+  if (_allModelsCache.models && Date.now() - _allModelsCache.ts < ALL_CACHE_TTL) {
+    return _allModelsCache.models;
+  }
+  try {
+    const { fetchAllModels } = await import('./api');
+    const data = await fetchAllModels();
+    if (data?.models) {
+      _allModelsCache.models = data.models;
+      _allModelsCache.ts = Date.now();
+      return data.models;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
 
 // ── 导出：Provider 列表 ──
 export const CHINESE_PROVIDERS = PROVIDER_META.filter(p => p.region === 'cn');
@@ -192,9 +213,9 @@ export const ALL_PROVIDERS = [
   ...OVERSEAS_PROVIDERS,
 ];
 
-// ── 导出：获取模型列表（优先动态，fallback 静态）──
+// ── 导出：获取模型列表（优先后端动态，fallback 到静态）──
 export async function getProviderModels(providerId, apiKeyId) {
-  // 检查缓存
+  // 检查单 provider 缓存
   const cached = _modelCache[providerId];
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
     return cached.models;
@@ -202,28 +223,70 @@ export async function getProviderModels(providerId, apiKeyId) {
 
   let models = [];
 
-  try {
-    if (providerId === 'openrouter') {
-      // OpenRouter 直接 fetch（公开 API）
-      const { fetchOpenRouterModels } = await import('./api');
-      models = await fetchOpenRouterModels();
-    } else if (providerId === 'custom') {
-      models = STATIC_MODELS['custom']?.map(id => ({ id, name: id, is_free: false })) || [];
-    } else {
-      // 其他供应商走后端代理
-      const { fetchModels } = await import('./api');
-      const result = await fetchModels(providerId, apiKeyId || '');
-      if (result?.models?.length) {
-        models = result.models;
+  // OpenRouter: 合并所有供应商的模型（OpenRouter 可路由到所有模型）
+          if (providerId === 'openrouter') {
+    try {
+      const allModels = await _ensureAllModels();
+      if (allModels) {
+        const seen = new Set();
+        for (const [, mList] of Object.entries(allModels)) {
+          if (!Array.isArray(mList)) continue;
+          for (const m of mList) {
+            if (seen.has(m.id)) continue;
+            seen.add(m.id);
+            models.push({
+              id: m.id,
+              name: m.name || m.id,
+              is_free: !!(m.is_free || FREE_MODELS.has(m.id)),
+              context_length: m.context_length || 0,
+            });
+          }
+        }
       }
+    } catch {
+      // fall through
     }
-  } catch {
-    // API 失败 → fallback
   }
 
-  // Fallback 到静态列表
+  // 普通 provider: 只取自身的模型
+  if (!models.length) {
+    try {
+      const allModels = await _ensureAllModels();
+      if (allModels && allModels[providerId]?.length) {
+        models = allModels[providerId].map(m => ({
+          id: m.id,
+          name: m.name || m.id,
+          is_free: !!(m.is_free || FREE_MODELS.has(m.id)),
+          context_length: m.context_length || 0,
+        }));
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Fallback: 直接 fetch（兼容旧 worker / 无后端场景）
+  if (!models.length) {
+    try {
+      if (providerId !== 'custom' && providerId !== 'openrouter') {
+        const { fetchModels } = await import('./api');
+        const result = await fetchModels(providerId, apiKeyId || '');
+        if (result?.models?.length) {
+          models = result.models;
+        }
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 最终 fallback：静态列表
   if (!models.length && STATIC_MODELS[providerId]) {
-    models = STATIC_MODELS[providerId].map(id => ({ id, name: id, is_free: false }));
+    if (providerId === 'custom') {
+      models = STATIC_MODELS['custom']?.map(id => ({ id, name: id, is_free: false })) || [];
+    } else {
+      models = STATIC_MODELS[providerId].map(id => ({ id, name: id, is_free: FREE_MODELS.has(id) }));
+    }
   }
 
   // 写入缓存

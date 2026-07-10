@@ -3,7 +3,7 @@ runtime/retry_policy.py — Retry + Failure Policy Engine
 
 Failure classification:
   - VALIDATION_FAIL  → retry same node (output was invalid, try again)
-  - LOGIC_FAIL       → fallback node (agent produced bad logic, try different approach)
+  - LOGIC_FAIL       → fallback node (teammate produced bad logic, try different approach)
   - SYSTEM_FAIL      → abort workflow (infrastructure error, no point retrying)
 
 Backoff strategies:
@@ -113,7 +113,7 @@ class RetryPolicy:
         action = self._type_actions.get(failure_type, RetryAction.RETRY)
 
         # Check retry budget
-        if unit.attempt >= self.max_retries:
+        if unit.attempt > self.max_retries:
             return RetryDecision(
                 action=RetryAction.ABORT,
                 reason=f"Max retries ({self.max_retries}) exhausted for {failure_type.value}",

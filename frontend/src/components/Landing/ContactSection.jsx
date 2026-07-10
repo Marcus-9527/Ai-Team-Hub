@@ -1,10 +1,24 @@
 import { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { useTranslation } from '../../i18n';
 
 gsap.registerPlugin(ScrollTrigger);
 
+const NAV_FOOTER_LINKS = [
+  { key: 'landing.footer.features', href: '#features' },
+  { key: 'landing.footer.how_it_works', href: '#how' },
+  { key: 'landing.footer.launch_app', href: '#app', isLaunch: true },
+];
+
+const SOCIAL_FOOTER_LINKS = [
+  { name: 'GitHub', url: 'https://github.com' },
+  { name: 'Twitter', url: 'https://twitter.com' },
+  { name: 'Discord', url: 'https://discord.com' },
+];
+
 export default function ContactSection({ onEnterApp }) {
+  const t = useTranslation();
   const sectionRef = useRef(null);
   const pinRef = useRef(null);
   const bgRef = useRef(null);
@@ -45,20 +59,20 @@ export default function ContactSection({ onEnterApp }) {
               <path d="M4 12h12m0 0l-4-4m4 4l-4 4" stroke="#fc1c46" strokeWidth="1.5" strokeLinecap="square" />
             </svg>
             <span style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fc1c46', fontWeight: 500 }}>
-              Get Started
+              {t('landing.cta.overline')}
             </span>
           </div>
           <h2 ref={titleRef} style={{ fontSize: 'clamp(40px, 6vw, 96px)', fontWeight: 700, lineHeight: 1.1, color: '#fff', marginBottom: '32px', letterSpacing: '-0.03em', textAlign: 'center' }}>
-            Ready to build<br />your AI team?
+            {t('landing.cta.title')}
           </h2>
           <p ref={descRef} style={{ fontSize: '16px', lineHeight: 1.7, color: 'rgba(255,255,255,0.45)', maxWidth: '480px', margin: '0 auto 48px', fontWeight: 400, textAlign: 'center' }}>
-            Create your first AI teammate in minutes. Choose a model, write a prompt, and start collaborating.
+            {t('landing.cta.desc')}
           </p>
           <button ref={btnRef} onClick={() => onEnterApp()}
             style={{ background: '#fc1c46', color: '#fff', border: 'none', borderRadius: '0', padding: '22px 56px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.08em', transition: 'background 0.3s ease', display: 'inline-block' }}
             onMouseEnter={(e) => e.target.style.background = '#e0163a'}
             onMouseLeave={(e) => e.target.style.background = '#fc1c46'}>
-            Launch App
+            {t('landing.cta.button')}
           </button>
         </div>
       </section>
@@ -67,44 +81,32 @@ export default function ContactSection({ onEnterApp }) {
         <div style={{ maxWidth: '90rem', margin: '0 auto', padding: '0 3.75rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '40px', marginBottom: '60px' }}>
             <div>
-              <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4c4c4c', fontWeight: 500, marginBottom: '20px' }}>Navigation</h4>
+              <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4c4c4c', fontWeight: 500, marginBottom: '20px' }}>{t('landing.footer.navigation')}</h4>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {['Features', 'How It Works', 'Launch App'].map((item) => (
-                  <li key={item} style={{ marginBottom: '10px' }}>
-                    <a href="#" onClick={(e) => { e.preventDefault(); onEnterApp(); }}
+                {NAV_FOOTER_LINKS.map((item) => (
+                  <li key={item.key} style={{ marginBottom: '10px' }}>
+                    <a href="#" onClick={(e) => { e.preventDefault(); if (item.isLaunch) onEnterApp(); else { const el = document.querySelector(item.href); if (el) el.scrollIntoView({ behavior: 'smooth' }); } }}
                       style={{ fontSize: '14px', color: '#ccc', textDecoration: 'none' }}>
-                      {item}
+                      {t(item.key)}
                     </a>
                   </li>
                 ))}
               </ul>
             </div>
+            <div style={{ gridColumn: 'span 2' }}></div>
             <div>
-              <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4c4c4c', fontWeight: 500, marginBottom: '20px' }}>Connect</h4>
+              <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4c4c4c', fontWeight: 500, marginBottom: '20px' }}>{t('landing.footer.connect')}</h4>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {['GitHub', 'Twitter', 'Discord'].map((item) => (
-                  <li key={item} style={{ marginBottom: '10px' }}>
-                    <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: '14px', color: '#ccc', textDecoration: 'none' }}>{item}</a>
+                {SOCIAL_FOOTER_LINKS.map((item) => (
+                  <li key={item.name} style={{ marginBottom: '10px' }}>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: '#ccc', textDecoration: 'none' }}>{item.name}</a>
                   </li>
                 ))}
               </ul>
             </div>
-            <div style={{ gridColumn: 'span 2' }}>
-              <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#4c4c4c', fontWeight: 500, marginBottom: '20px' }}>Stay Updated</h4>
-              <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', alignItems: 'center', maxWidth: '400px' }}>
-                <input type="email" placeholder="Email address"
-                  style={{ flex: 1, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.15)', padding: '12px 0', color: '#fff', fontSize: '14px', outline: 'none', fontFamily: 'inherit' }} />
-                <button type="submit" style={{ background: 'none', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.15)', padding: '12px 16px', cursor: 'pointer', color: '#fc1c46' }}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 8h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="square" />
-                  </svg>
-                </button>
-              </form>
-            </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '40px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-            <p style={{ fontSize: '12px', color: '#4c4c4c' }}>© 2024–2026 / AI Team Hub. All rights reserved.</p>
-            <p style={{ fontSize: '12px', color: '#4c4c4c' }}>Built with ♥ for AI-powered teams</p>
+            <p style={{ fontSize: '12px', color: '#4c4c4c' }}>{t('landing.footer.copyright')}</p>
           </div>
         </div>
       </footer>

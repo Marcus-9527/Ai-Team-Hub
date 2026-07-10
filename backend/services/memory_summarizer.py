@@ -1,9 +1,7 @@
 """
-memory_summarizer.py — STUB MODULE - NO RUNTIME EFFECT
+memory_summarizer.py — Conversation turn summarizer (stub).
 
-⚠️ STUB — This module has no active runtime consumers.
-    It is not imported by any execution path in the current system.
-    Do not extend; memory features are not wired into the FSM pipeline.
+Exposes SUMMARY_INTERVAL and process_conversation_turn for the memory layer.
 """
 
 import logging

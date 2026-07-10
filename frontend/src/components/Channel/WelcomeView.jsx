@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Bot, Users, Hash, Sparkles } from 'lucide-react';
+import { Users, Hash, Sparkles } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 
 export default function WelcomeView({ onCreateChannel }) {
@@ -19,7 +19,7 @@ export default function WelcomeView({ onCreateChannel }) {
           transition={{ delay: 0.1, duration: 0.5 }}
           className="w-20 h-20 mx-auto mb-8 rounded-2xl bg-primary flex items-center justify-center shadow-glow-aubergine"
         >
-          <Bot size={36} className="text-white" />
+          <Users size={36} className="text-white" />
         </motion.div>
 
         <h1 className="text-[28px] font-extrabold text-ink leading-tight tracking-[-0.02em] mb-3">

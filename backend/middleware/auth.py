@@ -8,9 +8,13 @@ Provides:
 """
 import uuid
 import time
-from fastapi import Request, HTTPException, Security
+import logging
+from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+logger = logging.getLogger("auth")
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -39,8 +43,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self._key_callback = api_key_callback
 
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for health and public endpoints
-        if request.url.path in ("/api/health", "/docs", "/openapi.json", "/favicon.ico"):
+        # Skip auth for health, docs, and favicon only
+        skip_paths = ("/api/health", "/v1/health", "/docs", "/openapi.json", "/favicon.ico")
+        if request.url.path in skip_paths:
             return await call_next(request)
 
         # Skip non-v1 routes (legacy /api/* routes don't require auth)
@@ -55,14 +60,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 api_key = auth[7:]
 
         if not api_key:
-            raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+            return JSONResponse(status_code=401, content={"detail": "Missing X-API-Key header"})
 
         # Validate API key
         tenant_id = ""
         if self._key_callback:
             result = await self._key_callback(api_key)
             if not result:
-                raise HTTPException(status_code=403, detail="Invalid API key")
+                return JSONResponse(status_code=403, content={"detail": "Invalid API key"})
             tenant_id = result
 
         # Set request context
@@ -82,13 +87,13 @@ async def validate_api_key(api_key: str) -> str:
         from backend.database import async_session
         from sqlalchemy import select
         from backend.models import APIKey
+        from backend.crypto import decrypt_value
         async with async_session() as sess:
-            result = await sess.execute(
-                select(APIKey).where(APIKey.api_key == api_key)
-            )
-            key_obj = result.scalar_one_or_none()
-            if key_obj:
-                return key_obj.provider  # use provider as tenant_id for now
-    except Exception:
-        pass
+            result = await sess.execute(select(APIKey))
+            keys = result.scalars().all()
+            for k in keys:
+                if decrypt_value(k.api_key) == api_key:
+                    return k.label
+    except Exception as e:
+        logger.warning(f"API key validation error: {e}")
     return ""

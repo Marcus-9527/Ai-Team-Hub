@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
+import { useTranslation, SUPPORTED_LANGUAGES } from '../../i18n';
 
-export default function Navbar({ onEnterApp }) {
+const NAV_ITEMS = [
+  { id: 'features', key: 'landing.menu.features', href: '#features' },
+  { id: 'how', key: 'landing.menu.how_it_works', href: '#how' },
+  { id: 'about', key: 'landing.menu.about', href: '#about' },
+];
+
+const SOCIAL_LINKS = [
+  { name: 'GitHub', url: 'https://github.com' },
+  { name: 'Twitter', url: 'https://twitter.com' },
+  { name: 'Discord', url: 'https://discord.com' },
+];
+
+export default function Navbar({ onEnterApp, lang, changeLang }) {
+  const t = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [blendModeNormal, setBlendModeNormal] = useState(false);
   const overlayRef = useRef(null);
@@ -10,6 +24,9 @@ export default function Navbar({ onEnterApp }) {
   const tlRef = useRef(null);
   const itemsRef = useRef([]);
   const underlineRefs = useRef([]);
+  const langRowRef = useRef(null);
+
+  const currentLang = SUPPORTED_LANGUAGES.find(l => l.id === lang) || SUPPORTED_LANGUAGES[1];
 
   const getBtnCenter = () => {
     if (!btnRef.current) return { x: window.innerWidth - 40, y: 40 };
@@ -39,12 +56,14 @@ export default function Navbar({ onEnterApp }) {
         { y: 50, opacity: 0, filter: 'blur(10px)' },
         { y: 0, opacity: 1, filter: 'blur(0px)', duration: 0.5, stagger: 0.1, ease: 'power3.out' }, 0.6);
       tl.fromTo('.menu-cta', { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(1.7)' }, 0.8);
+      tl.fromTo('.menu-lang-row', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: 'power3.out' }, 0.85);
       tl.fromTo('.menu-footer', { y: 15, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.9);
     } else if (tlRef.current) {
       const { x, y } = getBtnCenter();
       const tl = gsap.timeline({ defaults: { ease: 'power3.inOut' } });
       tlRef.current = tl;
       tl.to('.menu-footer', { y: 15, opacity: 0, duration: 0.15 }, 0);
+      tl.to('.menu-lang-row', { y: 12, opacity: 0, duration: 0.12 }, 0.02);
       tl.to('.menu-cta', { scale: 0.8, opacity: 0, duration: 0.15 }, 0.05);
       tl.to(itemsRef.current.filter(Boolean),
         { y: -25, opacity: 0, filter: 'blur(6px)', duration: 0.25, stagger: { each: 0.05, from: 'end' } }, 0.1);
@@ -60,6 +79,13 @@ export default function Navbar({ onEnterApp }) {
     setTimeout(() => { const el = document.querySelector(href); if (el) el.scrollIntoView({ behavior: 'smooth' }); }, 700);
   };
 
+  const handleLangChange = (newLang) => {
+    changeLang(newLang);
+    setMenuOpen(false);
+  };
+
+  const textColor = blendModeNormal ? '#000' : '#fff';
+
   return (
     <>
       <header style={{
@@ -69,17 +95,17 @@ export default function Navbar({ onEnterApp }) {
         transition: 'mix-blend-mode 0.3s ease',
       }}>
         <a href="#" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-          style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: blendModeNormal ? '#000' : '#fff', transition: 'color 0.3s ease' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: textColor, transition: 'color 0.3s ease' }}>
           <div style={{ width: '32px', height: '32px', background: '#fc1c46', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 700, color: '#000', letterSpacing: '-0.02em' }}>TL</div>
-          <span style={{ fontSize: '14px', fontWeight: 500, letterSpacing: '0.02em' }}>AI Team Hub</span>
+          <span style={{ fontSize: '14px', fontWeight: 500, letterSpacing: '0.02em' }}>{t('landing.hero.overline')}</span>
         </a>
 
         <button ref={btnRef} onClick={() => setMenuOpen(!menuOpen)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px', display: 'flex', flexDirection: 'column', gap: '5px', alignItems: 'flex-end', zIndex: 101, position: 'relative' }}
           aria-label="menu">
-          <span style={{ display: 'block', width: '24px', height: '1.5px', background: blendModeNormal ? '#000' : '#fff', transform: menuOpen ? 'rotate(45deg) translate(3px, 3px)' : 'none', transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.4s ease' }} />
-          <span style={{ display: 'block', width: '18px', height: '1.5px', background: blendModeNormal ? '#000' : '#fff', opacity: menuOpen ? 0 : 1, transition: 'opacity 0.3s ease, background 0.4s ease' }} />
-          <span style={{ display: 'block', width: '24px', height: '1.5px', background: blendModeNormal ? '#000' : '#fff', transform: menuOpen ? 'rotate(-45deg) translate(3px, -3px)' : 'none', transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.4s ease' }} />
+          <span style={{ display: 'block', width: '24px', height: '1.5px', background: textColor, transform: menuOpen ? 'rotate(45deg) translate(3px, 3px)' : 'none', transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.4s ease' }} />
+          <span style={{ display: 'block', width: '18px', height: '1.5px', background: textColor, opacity: menuOpen ? 0 : 1, transition: 'opacity 0.3s ease, background 0.4s ease' }} />
+          <span style={{ display: 'block', width: '24px', height: '1.5px', background: textColor, transform: menuOpen ? 'rotate(-45deg) translate(3px, -3px)' : 'none', transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.4s ease' }} />
         </button>
       </header>
 
@@ -90,10 +116,10 @@ export default function Navbar({ onEnterApp }) {
       }}>
         <div ref={contentRef} style={{ textAlign: 'center', opacity: 0, position: 'relative', zIndex: 1 }}>
           <nav>
-            {['Features', 'How It Works', 'About'].map((label, i) => (
-              <div key={label} ref={el => itemsRef.current[i] = el} style={{ marginBottom: '24px' }}>
-                <a href={`#${label.toLowerCase().replace(' ', '')}`}
-                  onClick={(e) => { e.preventDefault(); handleNavClick(label === 'Features' ? '#features' : label === 'How It Works' ? '#how' : '#about'); }}
+            {NAV_ITEMS.map((item, i) => (
+              <div key={item.id} ref={el => itemsRef.current[i] = el} style={{ marginBottom: '24px' }}>
+                <a href={item.href}
+                  onClick={(e) => { e.preventDefault(); handleNavClick(item.href); }}
                   style={{ fontSize: 'clamp(48px, 7vw, 96px)', fontWeight: 700, color: '#000', textDecoration: 'none', lineHeight: 1.05, letterSpacing: '-0.03em', display: 'inline-block', position: 'relative', paddingBottom: '8px', cursor: 'pointer' }}
                   onMouseEnter={(e) => {
                     const u = underlineRefs.current[i]; if (u) gsap.to(u, { scaleX: 1, duration: 0.5, ease: 'power3.inOut' });
@@ -103,28 +129,51 @@ export default function Navbar({ onEnterApp }) {
                     const u = underlineRefs.current[i]; if (u) gsap.to(u, { scaleX: 0, duration: 0.35, ease: 'power2.in' });
                     gsap.to(e.currentTarget, { x: 0, duration: 0.35, ease: 'power3.out' });
                   }}>
-                  {label}
+                  {t(item.key)}
                   <span ref={el => underlineRefs.current[i] = el} style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '3px', background: '#000', transform: 'scaleX(0)', transformOrigin: 'left center', pointerEvents: 'none' }} />
                 </a>
               </div>
             ))}
           </nav>
-          <div className="menu-cta" style={{ marginTop: '56px' }}>
+
+          {/* Language row — inline like social links */}
+          <div className="menu-lang-row" ref={langRowRef}
+            style={{ marginTop: '48px', display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '4px' }}>
+            {SUPPORTED_LANGUAGES.map((l) => {
+              const isActive = l.id === lang;
+              return (
+                <button key={l.id} onClick={() => handleLangChange(l.id)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '6px 10px', borderRadius: '4px',
+                    fontSize: '12px', fontWeight: isActive ? 600 : 400,
+                    letterSpacing: '0.04em', color: isActive ? '#fc1c46' : '#888',
+                    transition: 'color 0.25s ease, background 0.25s ease',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#000'; e.currentTarget.style.background = '#f0f0f0'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? '#fc1c46' : '#888'; e.currentTarget.style.background = 'none'; }}>
+                  {l.flag} {l.name}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="menu-cta" style={{ marginTop: '40px' }}>
             <button onClick={() => { setMenuOpen(false); onEnterApp(); }}
               style={{ background: '#fc1c46', color: '#fff', border: 'none', padding: '20px 52px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Launch App
+              {t('landing.menu.launch_app')}
             </button>
           </div>
         </div>
         <div className="menu-footer" style={{ position: 'absolute', bottom: '40px', left: '40px', right: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#999' }}>AI-Powered Team Collaboration</span>
+          <span style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#999' }}>{t('landing.menu.ai_collab')}</span>
           <div style={{ display: 'flex', gap: '24px' }}>
-            {['GitHub', 'Twitter', 'Discord'].map((s) => (
-              <a key={s} href="#" onClick={(e) => e.preventDefault()}
+            {SOCIAL_LINKS.map((s) => (
+              <a key={s.name} href={s.url} target="_blank" rel="noopener noreferrer"
                 style={{ fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#999', textDecoration: 'none', transition: 'color 0.3s ease' }}
                 onMouseEnter={(e) => e.target.style.color = '#fc1c46'}
                 onMouseLeave={(e) => e.target.style.color = '#999'}>
-                {s}
+                {s.name}
               </a>
             ))}
           </div>

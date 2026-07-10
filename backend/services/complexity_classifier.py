@@ -185,3 +185,144 @@ def classify_task(task: str) -> Classification:
     reasons.append(f"Scores: SIMPLE={simple_score}, STANDARD={standard_score}, COMPLEX={complex_score}")
 
     return Classification(best, round(confidence, 2), reasons)
+
+
+# ── Debate Trigger Gating ──
+
+# Greetings / trivial inputs that should NEVER enter debate
+_GREETING_PATTERNS = [
+    # Pure greetings — must end with punctuation/space/end, not followed by content
+    re.compile(r"^(hi|hello|hey|yo|sup|howdy|greetings)$", re.I),
+    re.compile(r"^(谢谢|感谢|thanks|thank you)[\.。!！]?$", re.I),
+    re.compile(r"^(好的|ok|okay|sure|行|嗯)$", re.I),
+    re.compile(r"^(bye|goodbye|see you|晚安|goodnight)$", re.I),
+    # Chinese greetings — strict (e.g. "你好" alone or with punctuation)
+    re.compile(r"^(你好|嗨|哈喽|喂)[!！\.。\s]*$", re.I),
+    re.compile(r"^(早上好|下午好|晚上好|早安|午安)[!！\.。\s]*$", re.I),
+    re.compile(r"^([？！?。，、\s]+)$"),  # punctuation-only
+    re.compile(r"^(lol|haha|哈哈|😂)$", re.I),
+]
+
+# Signals that indicate genuine multi-stakeholder complexity
+_TRADEOFF_KEYWORDS = [
+    "risk", "cost", "performance", "security", "scalability", "ux",
+    "tradeoff", "trade-off", "vs", "versus", "balance",
+    "风险", "成本", "性能", "安全", "扩展", "权衡", "对比", "取舍",
+    "架构设计", "技术选型", "方案对比", "优劣",
+]
+
+_ARCHITECTURE_KEYWORDS = [
+    "design", "architecture", "system", "platform", "framework",
+    "microservice", "monolith", "distributed", "migration",
+    "设计", "架构", "系统", "平台", "框架", "微服务", "迁移",
+    "技术选型", "方案", "选型",
+]
+
+# Combined: tradeoff + architecture signals indicate risk/complexity
+_TRADECTURE_KEYWORDS = _TRADEOFF_KEYWORDS + _ARCHITECTURE_KEYWORDS
+
+_CONSTRAINT_INDICATORS = [
+    re.compile(r"(同时|并且|同时满足|and also)", re.I),
+    re.compile(r"(必须|must|need to|require).{0,10}(同时|且|and|同时)", re.I),
+    re.compile(r"(限制|约束|constraint|limit|boundary|deadline)", re.I),
+    re.compile(r"(不能|cannot|can't|unable).{0,10}(同时|且|and|同时)", re.I),
+    # Chinese both-and patterns (no \b — word boundaries unreliable in CJK)
+    re.compile(r"(既要|both).{0,20}(又要|还要|and)", re.I),
+    # Multiple "need to" / imperative chaining
+    re.compile(r"(同时需要|同时保证|同时考虑|同时兼顾|并且需要|并且要)", re.I),
+    # English multi-constraint
+    re.compile(r"(while|meanwhile).{0,20}(also|keeping|maintaining)", re.I),
+]
+
+_ARCHITECTURE_KEYWORDS = [
+    "design", "architecture", "system", "platform", "framework",
+    "microservice", "monolith", "distributed", "migration",
+    "设计", "架构", "系统", "平台", "框架", "微服务", "迁移",
+    "技术选型", "方案", "选型",
+]
+
+
+def should_enter_debate(context: str) -> bool:
+    """
+    Determine whether a user input should enter the debate/conflict/decision pipeline.
+
+    Returns True ONLY if ANY of these conditions are met:
+      1. Complexity: > 2 actionable constraints OR requires architecture decisions
+      2. Risk: security / cost / performance / UX tradeoff present
+      3. Multi-role: at least 2 roles have materially different perspectives
+
+    Returns False (simple mode) for:
+      - Greetings, trivial Q&A, single-intent requests
+      - No tradeoff exists, no decision required
+    """
+    if not context or not context.strip():
+        return False
+
+    text = context.strip()
+    text_lower = text.lower()
+
+    # ── Phase 3: Block simple inputs ──
+    # Check greetings
+    for pattern in _GREETING_PATTERNS:
+        if pattern.match(text):
+            return False
+
+    # Very short inputs (<=20 chars for Latin, <=10 chars for CJK-only)
+    # CJK characters much more information per char
+    import unicodedata
+    has_cjk = any(
+        unicodedata.category(c).startswith('Lo') and '\u4e00' <= c <= '\u9fff'
+        for c in text
+    )
+    max_chars = 20 if not has_cjk else 8
+    if len(text) <= max_chars:
+        return False
+
+    # ── Phase 1: Complexity threshold ──
+    # Count actionable constraints
+    constraint_count = 0
+    for pattern in _CONSTRAINT_INDICATORS:
+        if pattern.search(text):
+            constraint_count += 1
+            # "both-and" patterns (既要...又要) count as 2 constraints
+            # because they express two simultaneous requirements
+            if "既要" in pattern.pattern or "both" in pattern.pattern.lower():
+                constraint_count += 1
+
+    # Check for architecture/design keywords
+    arch_signals = sum(1 for kw in _ARCHITECTURE_KEYWORDS if kw in text_lower)
+    if arch_signals >= 1:
+        constraint_count += 1
+
+    if constraint_count >= 2:
+        return True
+
+    # ── Phase 2: Risk presence ──
+    risk_signals = sum(1 for kw in _TRADECTURE_KEYWORDS if kw in text_lower)
+    # "between X and Y" in English implies a tradeoff between two concerns
+    if "between" in text_lower and "and" in text_lower:
+        risk_signals += 1
+    if risk_signals >= 2:
+        return True
+
+    # ── Phase 3: Multi-role necessity ──
+    # If the question touches multiple domains simultaneously
+    _DOMAIN_SIGNALS = {
+        "technical": ["code", "api", "database", "server", "bug", "deploy",
+                       "代码", "接口", "数据库", "服务器", "部署", "技术"],
+        "product": ["feature", "user", "requirement", "priority", "roadmap",
+                    "功能", "用户", "需求", "优先级", "产品"],
+        "design": ["ui", "ux", "design", "layout", "visual", "interaction",
+                   "设计", "界面", "交互", "视觉", "体验"],
+        "business": ["cost", "revenue", "market", "budget", "pricing",
+                     "成本", "收入", "市场", "预算", "价格"],
+    }
+    domains_hit = set()
+    for domain, keywords in _DOMAIN_SIGNALS.items():
+        if any(kw in text_lower for kw in keywords):
+            domains_hit.add(domain)
+    if len(domains_hit) >= 2:
+        return True
+
+    # ── Phase 4: Fallback — simple mode ──
+    return False

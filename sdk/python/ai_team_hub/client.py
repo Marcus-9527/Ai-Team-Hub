@@ -227,10 +227,6 @@ class Client:
         """Get cache visualization."""
         return self._get("/v1/cache/vis")
 
-    def get_fsm_transitions(self, task_id: str) -> Dict[str, Any]:
-        """Get FSM state transitions."""
-        return self._get(f"/v1/fsm-transitions/{task_id}")
-
     # ── Internal ──
 
     def _post(self, path: str, data: dict) -> dict:

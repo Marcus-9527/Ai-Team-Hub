@@ -2,12 +2,12 @@
 runtime/flow_control.py — Flow Control Hard Rules Enforcement
 
 Enforces at runtime:
-  1. No agent can decide next step
+  1. No teammate can decide next step
   2. No prompt-based flow control allowed
   3. No conversational chaining allowed
   4. Only Scheduler can change state
 
-This is the enforcement layer. It inspects agent outputs and
+This is the enforcement layer. It inspects teammate outputs and
 rejects any that try to control flow.
 """
 
@@ -85,11 +85,11 @@ class FlowControlResult:
 
 class FlowControlEnforcer:
     """
-    Enforces flow control hard rules on agent outputs.
+    Enforces flow control hard rules on teammate outputs.
 
     Usage:
         enforcer = FlowControlEnforcer()
-        result = enforcer.check(agent_id="planner", output='{"next_action": "execute"}')
+        result = enforcer.check(teammate_id="planner", output='{"next_action": "execute"}')
         if not result.enforced:
             # reject output, trigger retry
     """
@@ -102,12 +102,12 @@ class FlowControlEnforcer:
         self.mode = mode
         self._violation_count: dict[str, int] = {}
 
-    def check(self, agent_id: str, output: str) -> FlowControlResult:
+    def check(self, teammate_id: str, output: str) -> FlowControlResult:
         """
-        Check agent output for flow control violations.
+        Check teammate output for flow control violations.
 
         Returns FlowControlResult.
-        If enforced=False, the output must be rejected or the agent retried.
+        If enforced=False, the output must be rejected or the teammate retried.
         """
         if not output:
             return FlowControlResult(enforced=True, violation_type="", violation_detail="", action="allow")
@@ -117,10 +117,10 @@ class FlowControlEnforcer:
             match = pattern.search(output)
             if match:
                 violation = self._classify_violation(match.group())
-                self._violation_count[agent_id] = self._violation_count.get(agent_id, 0) + 1
+                self._violation_count[teammate_id] = self._violation_count.get(teammate_id, 0) + 1
 
                 logger.warning(
-                    f"[FLOW_CONTROL] Violation by {agent_id}: {violation} "
+                    f"[FLOW_CONTROL] Violation by {teammate_id}: {violation} "
                     f"pattern='{match.group()}' mode={self.mode}"
                 )
 

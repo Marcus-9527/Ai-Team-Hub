@@ -43,7 +43,7 @@ class TraceEvent:
     task_id: str
     timestamp: float = 0.0
     state: str = ""
-    agent_id: str = ""
+    teammate_id: str = ""
     attempt: int = 0
     data: dict = field(default_factory=dict)
 
@@ -58,7 +58,7 @@ class TraceEvent:
             "task_id": self.task_id,
             "timestamp": self.timestamp,
             "state": self.state,
-            "agent_id": self.agent_id,
+            "teammate_id": self.teammate_id,
             "attempt": self.attempt,
             "data": self.data,
         }, ensure_ascii=False, default=str)
@@ -73,8 +73,8 @@ class TraceLogger:
     Usage:
         trace = TraceLogger(trace_id="abc123", task_id="task456")
         trace.log_state_transition("PLAN", "EXECUTE")
-        trace.log_agent_dispatch("planner", input_snapshot={"task": "..."})
-        trace.log_agent_result("planner", output_snapshot={"result": "..."}, latency_ms=1200)
+        trace.log_teammate_dispatch("planner", input_snapshot={"task": "..."})
+        trace.log_teammate_result("planner", output_snapshot={"result": "..."}, latency_ms=1200)
         trace.log_validation({"is_valid": True, "reason": "ok"})
         report = trace.build_report()
     """
@@ -85,7 +85,7 @@ class TraceLogger:
         self._events: list[TraceEvent] = []
         self._start_time = time.time()
 
-    def _emit(self, event_type: str, state: str = "", agent_id: str = "",
+    def _emit(self, event_type: str, state: str = "", teammate_id: str = "",
               attempt: int = 0, data: dict = None) -> TraceEvent:
         """Emit a structured trace event."""
         event = TraceEvent(
@@ -93,7 +93,7 @@ class TraceLogger:
             trace_id=self.trace_id,
             task_id=self.task_id,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             attempt=attempt,
             data=data or {},
         )
@@ -109,22 +109,22 @@ class TraceLogger:
             data={"from": from_state, "to": to_state, "reason": reason},
         )
 
-    def log_agent_dispatch(self, agent_id: str, state: str, input_snapshot: dict,
+    def log_teammate_dispatch(self, teammate_id: str, state: str, input_snapshot: dict,
                            attempt: int = 1) -> TraceEvent:
         return self._emit(
             TraceEventType.AGENT_DISPATCH,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             attempt=attempt,
             data={"input": _safe_snapshot(input_snapshot)},
         )
 
-    def log_agent_result(self, agent_id: str, state: str, output_snapshot: dict,
+    def log_teammate_result(self, teammate_id: str, state: str, output_snapshot: dict,
                          latency_ms: int, attempt: int = 1) -> TraceEvent:
         return self._emit(
             TraceEventType.AGENT_RESULT,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             attempt=attempt,
             data={
                 "output": _safe_snapshot(output_snapshot),
@@ -132,50 +132,50 @@ class TraceLogger:
             },
         )
 
-    def log_validation(self, agent_id: str, state: str, validation_result: dict,
+    def log_validation(self, teammate_id: str, state: str, validation_result: dict,
                        attempt: int = 1) -> TraceEvent:
         return self._emit(
             TraceEventType.VALIDATION_RESULT,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             attempt=attempt,
             data={"validation": validation_result},
         )
 
-    def log_retry_scheduled(self, agent_id: str, state: str, attempt: int,
+    def log_retry_scheduled(self, teammate_id: str, state: str, attempt: int,
                             delay_ms: int, reason: str) -> TraceEvent:
         return self._emit(
             TraceEventType.RETRY_SCHEDULED,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             attempt=attempt,
             data={"delay_ms": delay_ms, "reason": reason},
         )
 
-    def log_failure_classified(self, agent_id: str, state: str, failure_type: str,
+    def log_failure_classified(self, teammate_id: str, state: str, failure_type: str,
                                error: str, action: str) -> TraceEvent:
         return self._emit(
             TraceEventType.FAILURE_CLASSIFIED,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             data={"failure_type": failure_type, "error": error[:200], "action": action},
         )
 
-    def log_context_isolated(self, agent_id: str, state: str,
+    def log_context_isolated(self, teammate_id: str, state: str,
                              input_keys: list[str]) -> TraceEvent:
         return self._emit(
             TraceEventType.CONTEXT_ISOLATED,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             data={"input_keys": input_keys},
         )
 
-    def log_flow_control(self, agent_id: str, state: str, rule: str,
+    def log_flow_control(self, teammate_id: str, state: str, rule: str,
                          enforced: bool) -> TraceEvent:
         return self._emit(
             TraceEventType.FLOW_CONTROL_ENFORCED,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             data={"rule": rule, "enforced": enforced},
         )
 
@@ -191,11 +191,11 @@ class TraceLogger:
             },
         )
 
-    def log_error(self, state: str, error: str, agent_id: str = "") -> TraceEvent:
+    def log_error(self, state: str, error: str, teammate_id: str = "") -> TraceEvent:
         return self._emit(
             TraceEventType.ERROR,
             state=state,
-            agent_id=agent_id,
+            teammate_id=teammate_id,
             data={"error": error[:500]},
         )
 

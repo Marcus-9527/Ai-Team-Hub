@@ -1,8 +1,8 @@
 """
-ai_service.py — LLM Runtime (v5 — FSM-compatible)
+ai_service.py — LLM Runtime (streaming).
 
 Streaming LLM call with connection pooling and cache key optimization.
-Used by: agent_functions.py (orchestrator), messages.py (chat).
+Used by: messages.py (chat), pipeline.py.
 """
 
 import json
@@ -38,6 +38,8 @@ PROVIDER_ENDPOINTS = {
     "stepfun": "https://api.stepfun.com/v1/chat/completions",
     "xfyun": "https://spark-api-open.xf-yun.com/v1/chat/completions",
     "siliconflow": "https://api.siliconflow.cn/v1/chat/completions",
+    "opencode-zen": "https://opencode.ai/zen/v1/chat/completions",
+    "opencode": "https://opencode.ai/zen/v1/chat/completions",
 }
 
 WARMUP_USER_MESSAGE = "Reply with exactly: OK"
@@ -82,6 +84,7 @@ async def stream_ai_response(
     base_url: str = None,
     channel_id: str = None,
     teammate_id: str = None,
+    max_tokens: int = 1024,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming LLM call. Yields text chunks.
@@ -101,7 +104,7 @@ async def stream_ai_response(
             "model": model,
             "system": system_prompt,
             "messages": messages,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
             "stream": True,
         }
     else:
@@ -112,7 +115,7 @@ async def stream_ai_response(
             "messages": full_messages,
             "stream": True,
             "temperature": 0.7,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
         }
 
     async with client.stream("POST", endpoint, headers=headers, json=payload) as resp:

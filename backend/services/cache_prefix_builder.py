@@ -19,7 +19,7 @@ Be concise and helpful.
 - Do not start with "Sure!" or "Of course!"
 
 [TEAM CONTEXT]
-This is a multi-agent team platform where different AI teammates
+This is a multi-teammate team platform where different AI teammates
 have different roles and expertise."""
 
 # Dummy padding messages (for cache warming)
@@ -57,7 +57,17 @@ def build_fixed_prefix(
         role = turn.get("role", "user")
         content = turn.get("content", "")
         if content:
-            messages.append({"role": role, "content": content[:500]})
+            # If content is a list (vision format), extract text blocks for prefix stability
+            if isinstance(content, list):
+                text_parts = [
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ]
+                text_content = "\n".join(text_parts)
+                if text_content.strip():
+                    messages.append({"role": role, "content": text_content[:500]})
+            else:
+                messages.append({"role": role, "content": content[:500]})
 
     # Pad to ensure stable structure
     while len(messages) < 8:
@@ -65,7 +75,7 @@ def build_fixed_prefix(
         if len(messages) < 8:
             messages.append({"role": "assistant", "content": ""})
 
-    # 9. Current input
+    # 9. Current input (may be str or vision list for multimodal)
     messages.append({"role": "user", "content": current_content})
 
     return messages[:9]

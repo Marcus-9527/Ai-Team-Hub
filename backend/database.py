@@ -26,7 +26,12 @@ class Base(DeclarativeBase):
 async def init_db():
     """Create all tables + enable WAL mode for concurrent writes."""
     from sqlalchemy import text
-    from backend.models import Channel, Teammate, APIKey, Message  # noqa: F401
+    from backend.models import Channel, Teammate, APIKey, Message, FileUpload, FileChunk  # noqa: F401
+    from backend.models import TaskModel, TaskStepModel, TaskExecutionModel  # noqa: F401
+    from backend.models import TaskApprovalModel  # noqa: F401
+    from backend.models import TaskPolicyModel  # noqa: F401
+    from backend.models import TaskPlanReviewModel  # noqa: F401
+    from backend.models import ExecutionResultModel  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("PRAGMA journal_mode=WAL;"))

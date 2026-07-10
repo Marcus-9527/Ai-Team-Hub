@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { useTranslation } from '../../i18n';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -27,6 +28,7 @@ function SplitText({ text, className, style, stagger = 0.03, delay = 0 }) {
 }
 
 export default function AboutSection() {
+  const t = useTranslation();
   const sectionRef = useRef(null);
   const labelRef = useRef(null);
   const linkRef = useRef(null);
@@ -49,14 +51,14 @@ export default function AboutSection() {
             <path d="M4 12h12m0 0l-4-4m4 4l-4 4" stroke="#fc1c46" strokeWidth="1.5" strokeLinecap="square" />
           </svg>
           <span style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fc1c46', fontWeight: 500 }}>
-            About AI Team Hub
+            {t('landing.about.overline')}
           </span>
         </div>
 
         <div style={{ maxWidth: '62rem', marginBottom: '80px' }}>
           <p style={{ fontSize: 'clamp(28px, 3.5vw, 52px)', fontWeight: 300, lineHeight: 1.35, color: '#fff' }}>
             <SplitText
-              text="AI Team Hub is a collaborative platform where you create custom AI teammates, assign them specialized roles, and bring them together in channels — like assembling your dream team, but every member is powered by AI."
+              text={t('landing.about.main')}
               stagger={0.04}
             />
           </p>
@@ -65,11 +67,11 @@ export default function AboutSection() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '80px', marginBottom: '80px' }}>
           <div>
             <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fc1c46', fontWeight: 500, marginBottom: '20px' }}>
-              The Problem
+              {t('landing.about.problem_label')}
             </h4>
             <p style={{ fontSize: '15px', lineHeight: 1.8, color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>
               <SplitText
-                text="Most AI tools give you a single chat window with a generic assistant. Real work requires specialists — a code reviewer, a data analyst, a product strategist — all working together."
+                text={t('landing.about.problem')}
                 stagger={0.025}
                 delay={0.3}
               />
@@ -77,11 +79,11 @@ export default function AboutSection() {
           </div>
           <div>
             <h4 style={{ fontSize: '11px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fc1c46', fontWeight: 500, marginBottom: '20px' }}>
-              Our Approach
+              {t('landing.about.approach_label')}
             </h4>
             <p style={{ fontSize: '15px', lineHeight: 1.8, color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>
               <SplitText
-                text="Create teammates with custom personalities, system prompts, and model providers. Add them to channels. Watch them collaborate, debate, and solve problems together in real time."
+                text={t('landing.about.approach')}
                 stagger={0.025}
                 delay={0.5}
               />
@@ -92,7 +94,7 @@ export default function AboutSection() {
         <div ref={linkRef}>
           <a href="#" onClick={(e) => e.preventDefault()}
             style={{ color: '#fc1c46', fontSize: '15px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-            See how it works
+            {t('landing.about.see_how')}
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 8h10m0 0l-3-3m3 3l-3 3" stroke="#fc1c46" strokeWidth="1.5" strokeLinecap="square" />
             </svg>

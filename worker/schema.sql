@@ -74,3 +74,34 @@ CREATE INDEX IF NOT EXISTS idx_apikeys_provider ON apikeys(provider);
 CREATE INDEX IF NOT EXISTS idx_trace_events_trace_id ON trace_events(trace_id);
 CREATE INDEX IF NOT EXISTS idx_trace_events_task_id ON trace_events(task_id);
 CREATE INDEX IF NOT EXISTS idx_trace_events_ts ON trace_events(ts);
+
+-- ═══════════════════════════════════════════════════════════
+-- RAG File Upload + Vector Retrieval (v2.1)
+-- ═══════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS file_uploads (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    size TEXT DEFAULT '0',
+    user_id TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    error_message TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS file_chunks (
+    id TEXT PRIMARY KEY,
+    file_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    "index" TEXT DEFAULT '0',
+    embedding TEXT,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (file_id) REFERENCES file_uploads(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_uploads_user_id ON file_uploads(user_id);
+CREATE INDEX IF NOT EXISTS idx_file_chunks_file_id ON file_chunks(file_id);

@@ -314,7 +314,7 @@ export default function PitchDeck({ onBack }) {
       `}</style>
 
       <button className="pd-back" onClick={() => onBack ? onBack() : (window.location.hash = '#/landing')}>
-        ← 返回
+        ← Back
       </button>
 
       <div className="pd-progress" ref={progressRef} />
@@ -325,13 +325,13 @@ export default function PitchDeck({ onBack }) {
           {/* 1 Cover */}
           <section className="pd-slide pd-cover pd-active" data-slide="0">
             <div className="pd-cover-line gsap-anim"><span className="pd-display">构建你的</span></div>
-            <div className="pd-cover-line gsap-anim pd-d1"><span className="pd-display"><span className="pd-red">AI 队友</span></span></div>
-            <p className="pd-cover-sub gsap-anim pd-d2">创建自定义 AI 队友，分配到频道，实时协作。</p>
+            <div className="pd-cover-line gsap-anim pd-d1"><span className="pd-display"><span className="pd-red">AI Team</span></span></div>
+            <p className="pd-cover-sub gsap-anim pd-d2">Create custom teammates, add them to channels, collaborate in real time.</p>
             <div className="pd-cover-actions gsap-anim pd-d3">
-              <button className="pd-cover-btn" onClick={() => goToSlide(1)}>开始探索 →</button>
+              <button className="pd-cover-btn" onClick={() => goToSlide(1)}>Start Exploring →</button>
             </div>
             <div className="pd-hint" ref={hintRef}>
-              <span>滚动</span>
+              <span>Scroll</span>
               <svg viewBox="0 0 14 20" fill="none"><rect x="1" y="1" width="12" height="18" rx="6" stroke="#444" strokeWidth="1"/><circle cx="7" cy="6" r="2" fill="#444"><animate attributeName="cy" values="5;11;5" dur="2s" repeatCount="indefinite"/></circle></svg>
             </div>
             <span className="pd-snum">01 / 10</span>
@@ -339,56 +339,56 @@ export default function PitchDeck({ onBack }) {
 
           {/* 2 TOC */}
           <section className="pd-slide" data-slide="1">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">目录</span></div>
-            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,5vw,72px)',marginBottom:'40px'}}>概览</h2>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">Contents</span></div>
+            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,5vw,72px)',marginBottom:'40px'}}>Overview</h2>
             <ul className="pd-toc-list">
-              <li className="pd-toc-item gsap-anim pd-d2" onClick={() => goToSlide(2)}><span className="pd-toc-num">01</span><div><div className="pd-toc-title">AI Team Hub 是什么</div><div className="pd-toc-desc">协作式 AI 团队平台</div></div></li>
-              <li className="pd-toc-item gsap-anim pd-d3" onClick={() => goToSlide(3)}><span className="pd-toc-num">02</span><div><div className="pd-toc-title">当前痛点</div><div className="pd-toc-desc">单一通用助手的局限性</div></div></li>
-              <li className="pd-toc-item gsap-anim pd-d4" onClick={() => goToSlide(4)}><span className="pd-toc-num">03</span><div><div className="pd-toc-title">解决思路</div><div className="pd-toc-desc">三步构建 AI 梦之队</div></div></li>
-              <li className="pd-toc-item gsap-anim pd-d5" onClick={() => goToSlide(5)}><span className="pd-toc-num">04</span><div><div className="pd-toc-title">核心能力</div><div className="pd-toc-desc">自定义、频道、多模型</div></div></li>
-              <li className="pd-toc-item gsap-anim pd-d6" onClick={() => goToSlide(8)}><span className="pd-toc-num">05</span><div><div className="pd-toc-title">应用场景</div><div className="pd-toc-desc">六大行业案例</div></div></li>
-              <li className="pd-toc-item gsap-anim pd-d7" onClick={() => goToSlide(9)}><span className="pd-toc-num">06</span><div><div className="pd-toc-title">开始使用</div><div className="pd-toc-desc">几分钟内创建第一个队友</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d2" onClick={() => goToSlide(2)}><span className="pd-toc-num">01</span><div><div className="pd-toc-title">What is AI Team Hub</div><div className="pd-toc-desc">AI Team Collaboration Platform</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d3" onClick={() => goToSlide(3)}><span className="pd-toc-num">02</span><div><div className="pd-toc-title">The Problem</div><div className="pd-toc-desc">The limits of a single general-purpose assistant</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d4" onClick={() => goToSlide(4)}><span className="pd-toc-num">03</span><div><div className="pd-toc-title">How It Works</div><div className="pd-toc-desc">Three steps to build your team</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d5" onClick={() => goToSlide(5)}><span className="pd-toc-num">04</span><div><div className="pd-toc-title">Capabilities</div><div className="pd-toc-desc">Customization, channels, multi-model</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d6" onClick={() => goToSlide(8)}><span className="pd-toc-num">05</span><div><div className="pd-toc-title">Use Cases</div><div className="pd-toc-desc">Six industry examples</div></div></li>
+              <li className="pd-toc-item gsap-anim pd-d7" onClick={() => goToSlide(9)}><span className="pd-toc-num">06</span><div><div className="pd-toc-title">Get Started</div><div className="pd-toc-desc">Create your first teammate in minutes</div></div></li>
             </ul>
             <span className="pd-snum">02 / 10</span>
           </section>
 
           {/* 3 What is it */}
           <section className="pd-slide" data-slide="2">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">AI Team Hub 是什么</span></div>
-            <h2 className="pd-display pd-stitle gsap-anim pd-d1" style={{marginBottom:'24px'}}>协作式 AI 团队平台</h2>
-            <p className="pd-sbody gsap-anim pd-d2">AI Team Hub 是一个协作式 AI 团队平台。你可以创建具有独特人格和专长的 AI 队友，将他们分配到不同的频道，让他们在实时对话中协作、讨论、解决问题。</p>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">What is AI Team Hub</span></div>
+            <h2 className="pd-display pd-stitle gsap-anim pd-d1" style={{marginBottom:'24px'}}>AI Team Collaboration Platform</h2>
+            <p className="pd-sbody gsap-anim pd-d2">AI Team Hub is a collaboration workspace where you create custom teammates, assign them roles, and bring them together in channels for real-time teamwork.</p>
             <div className="pd-stats">
-              <div className="pd-stat gsap-anim pd-d3"><div className="pd-stat-big">∞</div><div className="pd-stat-lbl">模型</div><div className="pd-stat-sub">支持任意 LLM</div></div>
-              <div className="pd-stat gsap-anim pd-d4"><div className="pd-stat-big">01</div><div className="pd-stat-lbl">平台</div><div className="pd-stat-sub">统一协作入口</div></div>
-              <div className="pd-stat gsap-anim pd-d5"><div className="pd-stat-big">24/7</div><div className="pd-stat-lbl">可用</div><div className="pd-stat-sub">全天候运行</div></div>
+              <div className="pd-stat gsap-anim pd-d3"><div className="pd-stat-big">∞</div><div className="pd-stat-lbl">Models</div><div className="pd-stat-sub">Any LLM supported</div></div>
+              <div className="pd-stat gsap-anim pd-d4"><div className="pd-stat-big">01</div><div className="pd-stat-lbl">Platform</div><div className="pd-stat-sub">Unified collaboration hub</div></div>
+              <div className="pd-stat gsap-anim pd-d5"><div className="pd-stat-big">24/7</div><div className="pd-stat-lbl">Available</div><div className="pd-stat-sub">Runs 24/7</div></div>
             </div>
             <span className="pd-snum">03 / 10</span>
           </section>
 
           {/* 4 Pain points */}
           <section className="pd-slide" data-slide="3">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">当前痛点</span></div>
-            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>大多数 AI 工具只给你</h2>
-            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>一个聊天窗口</h2>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">The Problem</span></div>
+            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>Most AI tools give you</h2>
+            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>one chat window</h2>
             <div className="pd-two gsap-anim pd-d3">
               <div className="pd-card">
-                <div className="pd-card-lbl">现状</div>
-                <div className="pd-card-title">通用助手<br/>缺乏专业深度</div>
+                <div className="pd-card-lbl">Today</div>
+                <div className="pd-card-title">General assistant<br/>lacks depth</div>
                 <ul className="pd-card-items">
-                  <li>单一通用助手，无法处理复杂任务</li>
-                  <li>不同工具之间无法协作</li>
-                  <li>缺乏持续的上下文记忆</li>
-                  <li>无法针对不同任务选择最优模型</li>
+                  <li>One general assistant can't handle complex tasks</li>
+                  <li>No collaboration between tools</li>
+                  <li>No persistent context or memory</li>
+                  <li>Can't pick the best model for each task</li>
                 </ul>
               </div>
               <div className="pd-card">
-                <div className="pd-card-lbl">需求</div>
-                <div className="pd-card-title">专业团队<br/>协同工作</div>
+                <div className="pd-card-lbl">What you need</div>
+                <div className="pd-card-title">Specialist team<br/>working together</div>
                 <ul className="pd-card-items">
-                  <li className="plus">多个专业 AI 角色协同工作</li>
-                  <li className="plus">代码审查、数据分析、产品策略</li>
-                  <li className="plus">实时协作与讨论</li>
-                  <li className="plus">针对不同任务选择最优模型</li>
+                  <li className="plus">Multiple specialist AI roles working together</li>
+                  <li className="plus">Code review, data analysis, product strategy</li>
+                  <li className="plus">Real-time collaboration and discussion</li>
+                  <li className="plus">Best model selected for each task</li>
                 </ul>
               </div>
             </div>
@@ -397,24 +397,24 @@ export default function PitchDeck({ onBack }) {
 
           {/* 5 Solution */}
           <section className="pd-slide" data-slide="4">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">解决思路</span></div>
-            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>三步构建</h2>
-            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>AI 梦之队</h2>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">How It Works</span></div>
+            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>Build in 3 steps</h2>
+            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>Your AI Team</h2>
             <div className="pd-three gsap-anim pd-d3">
               <div className="pd-step">
                 <div className="pd-step-num">01</div>
-                <div className="pd-step-title">创建</div>
-                <div className="pd-step-desc">创建 AI 队友，自定义人格、专长和系统提示词。每个队友都是独一无二的专业角色。</div>
+                <div className="pd-step-title">Create</div>
+                <div className="pd-step-desc">Create teammates with custom personalities and roles. Each one is a unique professional persona.</div>
               </div>
               <div className="pd-step">
                 <div className="pd-step-num">02</div>
-                <div className="pd-step-title">分配</div>
-                <div className="pd-step-desc">将多个队友分配到同一频道，让他们在同一个工作空间内协作。</div>
+                <div className="pd-step-title">Assign</div>
+                <div className="pd-step-desc">Assign multiple teammates to the same channel, where they collaborate in a shared workspace.</div>
               </div>
               <div className="pd-step">
                 <div className="pd-step-num">03</div>
-                <div className="pd-step-title">协作</div>
-                <div className="pd-step-desc">观看 AI 队友实时讨论、辩论、解决问题。就像拥有一支全天候的梦之队。</div>
+                <div className="pd-step-title">Collaborate</div>
+                <div className="pd-step-desc">Watch teammates discuss, debate, and solve problems in real time. Like having a full-time team ready for anything.</div>
               </div>
             </div>
             <span className="pd-snum">05 / 10</span>
@@ -422,28 +422,28 @@ export default function PitchDeck({ onBack }) {
 
           {/* 6 Capability 01 */}
           <section className="pd-slide" data-slide="5">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">核心能力 01</span></div>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">Capabilities 01</span></div>
             <div className="pd-cap">
               <div style={{position:'relative'}} className="gsap-anim">
                 <div className="pd-cap-nbg">01</div>
-                <h3 className="pd-cap-title">自定义 AI 队友</h3>
+                <h3 className="pd-cap-title">Custom Teammates</h3>
                 <p className="pd-cap-sub">Custom AI Teammates</p>
-                <p className="pd-cap-text">为每个 AI 队友设置独特性格和行为风格。定义专业领域，从高级软件工程师到创意策略师，每个角色都精确适配你的需求。</p>
+                <p className="pd-cap-text">Set unique personalities and behavior styles for each teammate. From senior engineers to creative strategists, every role is tailored to your needs.</p>
                 <ul className="pd-cap-list">
-                  <li>自定义人格与行为风格</li>
-                  <li>定义专业领域和技能范围</li>
-                  <li>自定义系统提示词，精确控制 AI 行为</li>
-                  <li>为每个队友设置头像和名称</li>
+                  <li>Custom personality and behavior style</li>
+                  <li>Define expertise and skill range</li>
+                  <li>Custom system prompts for precise behavior control</li>
+                  <li>Set avatar and name for each teammate</li>
                 </ul>
               </div>
               <div className="pd-cap-panel gsap-anim pd-d2">
-                <div className="pd-panel-lbl">队友示例</div>
+                <div className="pd-panel-lbl">Teammate Example</div>
                 <div className="pd-panel-av">A</div>
-                <div className="pd-panel-row"><span className="pd-panel-rl">名称</span><span className="pd-panel-rv">Alice</span></div>
-                <div className="pd-panel-row"><span className="pd-panel-rl">角色</span><span className="pd-panel-rv">高级工程师</span></div>
-                <div className="pd-panel-row"><span className="pd-panel-rl">模型</span><span className="pd-panel-rv">GPT-4</span></div>
-                <div className="pd-panel-row"><span className="pd-panel-rl">专长</span><span className="pd-panel-rv">代码审查</span></div>
-                <div className="pd-panel-row"><span className="pd-panel-rl">状态</span><span className="pd-panel-rv" style={{color:'#fc1c46'}}>● 活跃</span></div>
+                <div className="pd-panel-row"><span className="pd-panel-rl">Name</span><span className="pd-panel-rv">Alice</span></div>
+                <div className="pd-panel-row"><span className="pd-panel-rl">Role</span><span className="pd-panel-rv">Senior Engineer</span></div>
+                <div className="pd-panel-row"><span className="pd-panel-rl">Model</span><span className="pd-panel-rv">GPT-4</span></div>
+                <div className="pd-panel-row"><span className="pd-panel-rl">Expertise</span><span className="pd-panel-rv">Code Review</span></div>
+                <div className="pd-panel-row"><span className="pd-panel-rl">Status</span><span className="pd-panel-rv" style={{color:'#fc1c46'}}>● Active</span></div>
               </div>
             </div>
             <span className="pd-snum">06 / 10</span>
@@ -451,32 +451,32 @@ export default function PitchDeck({ onBack }) {
 
           {/* 7 Capability 02 */}
           <section className="pd-slide" data-slide="6">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">核心能力 02</span></div>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">Capabilities 02</span></div>
             <div className="pd-cap">
               <div style={{position:'relative'}} className="gsap-anim">
                 <div className="pd-cap-nbg">02</div>
-                <h3 className="pd-cap-title">基于频道的协作</h3>
+                <h3 className="pd-cap-title">Channel-Based Collaboration</h3>
                 <p className="pd-cap-sub">Channel-Based Collaboration</p>
-                <p className="pd-cap-text">将多个 AI 队友组织到频道中。每个频道是一个独立的工作空间，队友们在其中实时协作、讨论、解决问题。</p>
+                <p className="pd-cap-text">Organize multiple teammates into channels. Each channel is an independent workspace where your team collaborates in real time.</p>
                 <ul className="pd-cap-list">
-                  <li>创建多个频道，按项目或团队组织</li>
-                  <li>将多个队友加入同一频道</li>
-                  <li>实时多 AI 对话与协作</li>
-                  <li>频道级别的上下文管理</li>
+                  <li>Create multiple channels, organized by project or team</li>
+                  <li>Add multiple teammates to the same channel</li>
+                  <li>Real-time multi-AI conversation and collaboration</li>
+                  <li>Channel-level context management</li>
                 </ul>
               </div>
               <div className="pd-cap-panel gsap-anim pd-d2">
-                <div className="pd-panel-lbl">活跃频道</div>
-                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># 代码审查</span><span className="pd-ch-members">3 名成员</span></div>
-                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># 数据分析</span><span className="pd-ch-members">2 名成员</span></div>
-                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># 产品策略</span><span className="pd-ch-members">4 名成员</span></div>
-                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># 安全审计</span><span className="pd-ch-members">2 名成员</span></div>
+                <div className="pd-panel-lbl">Active Channels</div>
+                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># code-review</span><span className="pd-ch-members">3 members</span></div>
+                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># data-analysis</span><span className="pd-ch-members">2 members</span></div>
+                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># product-strategy</span><span className="pd-ch-members">4 members</span></div>
+                <div className="pd-ch-item"><div className="pd-ch-dot"/><span className="pd-ch-name"># security-audit</span><span className="pd-ch-members">2 members</span></div>
                 <div style={{marginTop:'20px',paddingTop:'14px',borderTop:'1px solid rgba(255,255,255,0.05)'}}>
-                  <div className="pd-panel-lbl" style={{marginBottom:'10px'}}>实时对话</div>
+                  <div className="pd-panel-lbl" style={{marginBottom:'10px'}}>Real-Time Conversation</div>
                   <div style={{fontSize:'12px',color:'#666',lineHeight:1.8}}>
-                    <span style={{color:'#fc1c46'}}>Alice:</span> 发现认证模块有内存泄漏...<br/>
-                    <span style={{color:'#fc1c46'}}>Bob:</span> 正在检查会话处理器。<br/>
-                    <span style={{color:'#fc1c46'}}>Charlie:</span> 问题在第42行，缺少清理回调。
+                    <span style={{color:'#fc1c46'}}>Alice:</span> Found a memory leak in the auth module...<br/>
+                    <span style={{color:'#fc1c46'}}>Bob:</span> Checking the session handler.<br/>
+                    <span style={{color:'#fc1c46'}}>Charlie:</span> It's on line 42, missing cleanup callback.
                   </div>
                 </div>
               </div>
@@ -486,27 +486,27 @@ export default function PitchDeck({ onBack }) {
 
           {/* 8 Capability 03 */}
           <section className="pd-slide" data-slide="7">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">核心能力 03</span></div>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">Capabilities 03</span></div>
             <div className="pd-cap">
               <div style={{position:'relative'}} className="gsap-anim">
                 <div className="pd-cap-nbg">03</div>
-                <h3 className="pd-cap-title">多模型支持</h3>
+                <h3 className="pd-cap-title">Multi-Model Support</h3>
                 <p className="pd-cap-sub">Multi-Model Support</p>
-                <p className="pd-cap-text">为每个队友选择最适合的 LLM — GPT-4、Claude、Gemini，或任何 OpenAI 兼容接口。不同的角色，不同的模型。</p>
+                <p className="pd-cap-text">Choose the best LLM for each teammate — GPT-4, Claude, Gemini, or any OpenAI-compatible API. The right model for the right role.</p>
                 <ul className="pd-cap-list">
-                  <li>GPT-4 — 最强大的推理能力</li>
-                  <li>Claude — 长文本理解与文档处理</li>
-                  <li>Gemini — 多模态与创意任务</li>
-                  <li>自定义 — 支持任意 OpenAI 兼容 API</li>
+                  <li>GPT-4 — Most powerful reasoning</li>
+                  <li>Claude — Long-text understanding and document processing</li>
+                  <li>Gemini — Multimodal and creative tasks</li>
+                  <li>Custom — Any OpenAI-compatible API</li>
                 </ul>
               </div>
               <div className="pd-cap-panel gsap-anim pd-d2">
-                <div className="pd-panel-lbl">支持的模型</div>
+                <div className="pd-panel-lbl">Supported Models</div>
                 <div className="pd-model-grid">
                   <div className="pd-model"><div className="pd-model-name">GPT-4</div><div className="pd-model-prov">OpenAI</div></div>
                   <div className="pd-model"><div className="pd-model-name">Claude</div><div className="pd-model-prov">Anthropic</div></div>
                   <div className="pd-model"><div className="pd-model-name">Gemini</div><div className="pd-model-prov">Google</div></div>
-                  <div className="pd-model"><div className="pd-model-name">自定义</div><div className="pd-model-prov">任意 API</div></div>
+                  <div className="pd-model"><div className="pd-model-name">Custom</div><div className="pd-model-prov">Any API</div></div>
                 </div>
               </div>
             </div>
@@ -515,16 +515,16 @@ export default function PitchDeck({ onBack }) {
 
           {/* 9 Use cases */}
           <section className="pd-slide" data-slide="8">
-            <div className="pd-tag gsap-anim"><span className="pd-tag-t">应用场景</span></div>
-            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>AI 队友</h2>
-            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>适用于每个角色</h2>
+            <div className="pd-tag gsap-anim"><span className="pd-tag-t">Use Cases</span></div>
+            <h2 className="pd-display gsap-anim pd-d1" style={{fontSize:'clamp(36px,6vw,80px)',marginBottom:'12px'}}>Your Team</h2>
+            <h2 className="pd-display gsap-anim pd-d2 pd-red" style={{fontSize:'clamp(36px,6vw,80px)'}}>for every role</h2>
             <div className="pd-cases gsap-anim pd-d3">
-              <div className="pd-case"><div className="pd-case-cat">工程</div><div className="pd-case-title">代码审查</div><div className="pd-case-desc">多 AI 同行评审，架构分析与代码质量检查</div></div>
-              <div className="pd-case"><div className="pd-case-cat">分析</div><div className="pd-case-title">数据洞察</div><div className="pd-case-desc">实时数据分析与可视化，快速洞察业务趋势</div></div>
-              <div className="pd-case"><div className="pd-case-cat">产品</div><div className="pd-case-title">产品策略</div><div className="pd-case-desc">AI 驱动的市场研究与产品规划</div></div>
-              <div className="pd-case"><div className="pd-case-cat">安全</div><div className="pd-case-title">安全审计</div><div className="pd-case-desc">自动化漏洞扫描与安全报告生成</div></div>
-              <div className="pd-case"><div className="pd-case-cat">设计</div><div className="pd-case-title">UX 设计</div><div className="pd-case-desc">AI 辅助界面设计与原型迭代</div></div>
-              <div className="pd-case"><div className="pd-case-cat">文档</div><div className="pd-case-title">技术文档</div><div className="pd-case-desc">自动生成技术文档与 API 参考</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Engineering</div><div className="pd-case-title">Code Review</div><div className="pd-case-desc">Multi-AI peer review, architecture analysis, and code quality checks</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Analytics</div><div className="pd-case-title">Data Insights</div><div className="pd-case-desc">Real-time data analysis and visualization, fast business trend insights</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Product</div><div className="pd-case-title">Product Strategy</div><div className="pd-case-desc">AI-driven market research and product planning</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Security</div><div className="pd-case-title">Security Audit</div><div className="pd-case-desc">Automated vulnerability scanning and security report generation</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Design</div><div className="pd-case-title">UX Design</div><div className="pd-case-desc">AI-assisted interface design and prototype iteration</div></div>
+              <div className="pd-case"><div className="pd-case-cat">Docs</div><div className="pd-case-title">Technical Docs</div><div className="pd-case-desc">Auto-generated technical documentation and API references</div></div>
             </div>
             <span className="pd-snum">09 / 10</span>
           </section>
@@ -533,7 +533,7 @@ export default function PitchDeck({ onBack }) {
           <section className="pd-slide pd-cta" data-slide="9">
             <div className="pd-tag gsap-anim" style={{justifyContent:'center'}}><span className="pd-tag-t">开始使用</span></div>
             <h2 className="pd-display pd-cta-title gsap-anim pd-d1">准备好构建<br/>你的 <span className="pd-red">AI 团队</span>了吗？</h2>
-            <p className="pd-cta-sub gsap-anim pd-d2">几分钟内创建你的第一个 AI 队友。选择模型，编写提示词，开始协作。</p>
+            <p className="pd-cta-sub gsap-anim pd-d2">Create your first teammate in minutes. Choose a model, write a personality prompt, and start collaborating.</p>
             <button className="pd-cta-btn gsap-anim pd-d3" onClick={() => onBack ? onBack() : (window.location.hash = '#/app')}>立即开始 →</button>
             <div className="pd-cta-footer">
               <span>© 2024–2026 AI Team Hub. 保留所有权利。</span>

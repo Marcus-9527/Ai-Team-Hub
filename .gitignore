@@ -1,0 +1,49 @@
+# ── Secrets (NEVER commit) ──
+.cf_token
+.or_key
+.or_key_b64
+*.pem
+*.key
+.crypto_key
+.env
+.env.*
+!.env.example
+deploy/.env
+
+# ── Encryption keys ──
+.crypto_key
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+backend/venv/
+.pytest_cache/
+.mypy_cache/
+
+# ── Node ──
+node_modules/
+dist/
+frontend/dist/
+
+# ── IDE ──
+.idea/
+.vscode/
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Runtime data (DB / uploads / local state) ──
+data/
+.wrangler/
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# ── Build caches ──
+.vite/
+.cache/

@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from '../../i18n';
 
 export default function HeroSection({ onScrollDown }) {
+  const t = useTranslation();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -22,34 +24,34 @@ export default function HeroSection({ onScrollDown }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '40px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(16px)', transition: `all 0.8s ${ease} 0.1s` }}>
           <span style={{ display: 'inline-block', width: '24px', height: '1px', background: '#fc1c46' }} />
           <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.18em', color: '#fc1c46', fontWeight: 500 }}>
-            AI Team Hub
+            {t('landing.hero.overline')}
           </span>
         </div>
 
         {/* Title line 1 */}
         <div style={{ overflow: 'hidden', marginBottom: '8px' }}>
           <span style={{ display: 'block', fontSize: 'clamp(56px, 7vw, 140px)', fontWeight: 700, lineHeight: 0.95, letterSpacing: '-0.02em', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.25s` }}>
-            Build
+            {t('landing.hero.title1')}
           </span>
         </div>
 
         {/* Title line 2 */}
         <div style={{ overflow: 'hidden', marginBottom: '8px' }}>
           <span style={{ display: 'block', fontSize: 'clamp(56px, 7vw, 140px)', fontWeight: 700, lineHeight: 0.95, letterSpacing: '-0.02em', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.4s` }}>
-            Your AI
+            {t('landing.hero.title2')}
           </span>
         </div>
 
         {/* Title line 3 */}
         <div style={{ overflow: 'hidden', marginBottom: '0' }}>
           <span style={{ display: 'block', fontSize: 'clamp(56px, 7vw, 140px)', fontWeight: 700, lineHeight: 0.95, letterSpacing: '-0.02em', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(100%)', transition: `all 1.4s ${ease} 0.55s` }}>
-            Team
+            {t('landing.hero.title3')}
           </span>
         </div>
 
         {/* Subtitle */}
         <p style={{ marginTop: '48px', maxWidth: '380px', fontSize: '14px', lineHeight: 1.7, color: '#999', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(24px)', transition: `all 1.2s ${ease} 1.0s` }}>
-          Create AI teammates with custom personalities, assign them to channels, and collaborate in real time.
+          {t('landing.hero.subtitle')}
         </p>
 
         {/* CTA */}
@@ -58,13 +60,13 @@ export default function HeroSection({ onScrollDown }) {
             style={{ background: '#fc1c46', color: '#000', border: 'none', padding: '13px 30px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.1em', transition: 'background 0.3s ease' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = '#e0163a'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = '#fc1c46'; }}>
-            Get Started
+            {t('landing.hero.get_started')}
           </button>
-          <button onClick={() => window.open('/preview/', '_blank')}
+          <button onClick={handleScroll}
             style={{ fontSize: '11px', fontWeight: 500, color: '#fff', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: '0.08em', transition: 'opacity 0.3s ease', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.6'; }}
             onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
-            Learn More →
+            {t('landing.hero.learn_more')} →
           </button>
         </div>
       </div>

@@ -3,10 +3,9 @@ routes/v1_observability.py — Observability API for UI consumption.
 
 Provides structured data for:
 - Task timeline view
-- Agent execution graph
+- Team interaction flow
 - Cost breakdown
 - Cache hit visualization
-- FSM state transitions
 """
 import time
 from fastapi import APIRouter, HTTPException, Request
@@ -17,15 +16,9 @@ router = APIRouter(prefix="/v1", tags=["v1-observability"])
 
 
 class TimelineResponse(BaseModel):
-    task_id: str = ""
+    request_id: str = ""
     events: List[Dict[str, Any]] = []
     total_duration_ms: float = 0
-
-
-class AgentGraphResponse(BaseModel):
-    task_id: str = ""
-    nodes: List[Dict[str, Any]] = []
-    edges: List[Dict[str, str]] = []
 
 
 class CacheVisualizationResponse(BaseModel):
@@ -35,14 +28,14 @@ class CacheVisualizationResponse(BaseModel):
     layers: List[Dict[str, Any]] = []
 
 
-@router.get("/timeline/{task_id}", response_model=TimelineResponse)
-async def get_task_timeline(task_id: str):
-    """Get task execution timeline for UI rendering."""
-    from backend.services.orchestrator_core import get_observability
+@router.get("/timeline/{request_id}", response_model=TimelineResponse)
+async def get_task_timeline(request_id: str):
+    """Get team interaction timeline for UI rendering."""
+    from backend.services.orchestrator_observability import get_observability
     start = time.time()
 
     obs = get_observability()
-    replay = obs.replay(task_id) if hasattr(obs, "replay") else {}
+    replay = obs.replay(request_id) if hasattr(obs, "replay") else {}
     events = replay.get("events", [])
 
     total_ms = 0
@@ -52,88 +45,45 @@ async def get_task_timeline(task_id: str):
         total_ms += lat
         timeline_events.append({
             "step": ev.get("step", ""),
-            "agent": ev.get("agent", ""),
+            "teammate": ev.get("agent", ""),
             "latency_ms": lat,
             "timestamp": ev.get("timestamp", ""),
             "phase": _classify_phase(ev.get("step", "")),
         })
 
     return TimelineResponse(
-        task_id=task_id,
+        request_id=request_id,
         events=timeline_events,
         total_duration_ms=round(total_ms, 2),
     )
 
 
-@router.get("/agent-graph/{task_id}", response_model=AgentGraphResponse)
-async def get_agent_graph(task_id: str):
-    """Get agent execution graph (nodes = agents, edges = transitions)."""
-    from backend.services.orchestrator_core import get_observability
+@router.get("/cost/{request_id}")
+async def get_cost_breakdown(request_id: str):
+    """Get cost breakdown for a team collaboration."""
+    from backend.services.orchestrator_observability import get_observability
 
     obs = get_observability()
-    replay = obs.replay(task_id) if hasattr(obs, "replay") else {}
+    replay = obs.replay(request_id) if hasattr(obs, "replay") else {}
     events = replay.get("events", [])
 
-    nodes = []
-    edges = []
-    seen_agents = set()
-
-    for i, ev in enumerate(events):
-        agent = ev.get("agent", "system")
-        step = ev.get("step", "")
-
-        if agent not in seen_agents:
-            seen_agents.add(agent)
-            nodes.append({
-                "id": agent,
-                "label": agent,
-                "type": "agent" if agent != "system" else "system",
-                "latency_ms": ev.get("latency_ms", 0),
-            })
-
-        # Create edges between consecutive events
-        if i > 0:
-            prev_agent = events[i-1].get("agent", "system")
-            edges.append({
-                "from": prev_agent,
-                "to": agent,
-                "label": step,
-            })
-
-    return AgentGraphResponse(
-        task_id=task_id,
-        nodes=nodes,
-        edges=edges,
-    )
-
-
-@router.get("/cost/{task_id}")
-async def get_cost_breakdown(task_id: str):
-    """Get cost breakdown for a task."""
-    from backend.services.orchestrator_core import get_observability
-
-    obs = get_observability()
-    replay = obs.replay(task_id) if hasattr(obs, "replay") else {}
-    events = replay.get("events", [])
-
-    agent_costs = {}
+    teammate_costs = {}
     total_calls = 0
     for ev in events:
-        agent = ev.get("agent", "system")
-        if agent != "system":
+        teammate = ev.get("agent", "system")
+        if teammate != "system":
             total_calls += 1
-            if agent not in agent_costs:
-                agent_costs[agent] = {"calls": 0, "tokens_estimated": 0}
-            agent_costs[agent]["calls"] += 1
-            # Estimate tokens from output_data length
+            if teammate not in teammate_costs:
+                teammate_costs[teammate] = {"calls": 0, "tokens_estimated": 0}
+            teammate_costs[teammate]["calls"] += 1
             output_len = len(str(ev.get("output_data", "")))
-            agent_costs[agent]["tokens_estimated"] += output_len // 4  # rough estimate
+            teammate_costs[teammate]["tokens_estimated"] += output_len // 4
 
     return {
-        "task_id": task_id,
+        "request_id": request_id,
         "total_calls": total_calls,
-        "breakdown": agent_costs,
-        "total_estimated_tokens": sum(a["tokens_estimated"] for a in agent_costs.values()),
+        "breakdown": teammate_costs,
+        "total_estimated_tokens": sum(a["tokens_estimated"] for a in teammate_costs.values()),
         "note": "Cost estimation is approximate. Actual billing depends on model pricing.",
     }
 
@@ -182,48 +132,47 @@ async def get_cache_visualization():
     )
 
 
-@router.get("/fsm-transitions/{task_id}")
-async def get_fsm_transitions(task_id: str):
-    """Get FSM state transitions for a task."""
-    from backend.services.orchestrator_core import get_observability
+@router.get("/team/interactions/{request_id}")
+async def get_team_interactions(request_id: str):
+    """Get team member interaction flow for a request."""
+    from backend.services.orchestrator_observability import get_observability
 
     obs = get_observability()
-    replay = obs.replay(task_id) if hasattr(obs, "replay") else {}
+    replay = obs.replay(request_id) if hasattr(obs, "replay") else {}
     events = replay.get("events", [])
 
-    transitions = []
+    interactions = []
     for ev in events:
         step = ev.get("step", "")
         if step.startswith("fsm_") or step in ("fsm_completed", "init"):
-            transitions.append({
-                "step": step,
+            interactions.append({
+                "step": step.replace("fsm_", ""),
                 "state": step.replace("fsm_", ""),
                 "latency_ms": ev.get("latency_ms", 0),
-                "agent": ev.get("agent", "system"),
+                "teammate": ev.get("agent", "system"),
             })
 
     return {
-        "task_id": task_id,
-        "transitions": transitions,
-        "final_state": transitions[-1]["state"] if transitions else "unknown",
-        "total_transitions": len(transitions),
+        "request_id": request_id,
+        "interactions": interactions,
+        "final_state": interactions[-1]["state"] if interactions else "unknown",
+        "total_interactions": len(interactions),
     }
 
 
 @router.get("/system/summary")
 async def get_system_summary():
     """Get overall system summary for dashboard."""
-    from backend.services.orchestrator_core import get_observability
+    from backend.services.orchestrator_observability import get_observability
     from backend.cache import teammate_cache, channel_cache, apikey_cache, message_cache
 
     obs = get_observability()
 
-    # Count traces
     trace_count = len(obs._traces) if hasattr(obs, "_traces") else 0
 
     return {
         "system": "AI Team Hub",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "total_traces": trace_count,
         "cache_summary": {
             "teammate_cache": teammate_cache.stats,
@@ -233,8 +182,7 @@ async def get_system_summary():
         },
         "active_components": {
             "observability": True,
-            "fsm_orchestrator": True,
-            "maeos": True,
+            "team_engine": True,
             "workspace_manager": True,
             "cache_kernel": True,
         },
@@ -246,11 +194,11 @@ def _classify_phase(step: str) -> str:
     step_lower = step.lower()
     if "init" in step_lower or "classif" in step_lower:
         return "initialization"
-    if "plan" in step_lower:
+    if "plan" in step_lower or "strategy" in step_lower:
         return "planning"
-    if "execut" in step_lower:
+    if "execut" in step_lower or "engineer" in step_lower:
         return "execution"
-    if "review" in step_lower or "valid" in step_lower:
+    if "review" in step_lower or "valid" in step_lower or "quality" in step_lower:
         return "review"
     if "divers" in step_lower:
         return "diversity"

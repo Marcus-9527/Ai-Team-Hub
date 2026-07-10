@@ -107,15 +107,8 @@ async def update_teammate(teammate_id: str, data: dict, db: AsyncSession = Depen
 
     # If system_prompt changed, invalidate all warming + memory for this teammate
     if "system_prompt" in data:
-        from backend.cache import _deepseek_warmed, _deepseek_warmed_lock, _memory_summaries, _memory_summaries_lock
-        with _deepseek_warmed_lock:
-            keys_to_remove = [k for k in _deepseek_warmed if k.startswith(f"{teammate_id}:")]
-            for k in keys_to_remove:
-                del _deepseek_warmed[k]
-        with _memory_summaries_lock:
-            keys_to_remove = [k for k in _memory_summaries if k.startswith(f"{teammate_id}:")]
-            for k in keys_to_remove:
-                del _memory_summaries[k]
+        from backend.services.cache_warmup_service import invalidate_warmup
+        invalidate_warmup(teammate_id)
 
     return {"ok": True}
 

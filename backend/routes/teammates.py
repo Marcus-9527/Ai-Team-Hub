@@ -9,6 +9,8 @@ from backend.database import get_db
 from backend.models import Teammate
 from backend.cache import teammate_cache
 from backend.services.cache_warmup_service import invalidate_warmup
+from backend.middleware.auth import require_admin
+from fastapi import Depends
 
 router = APIRouter(prefix="/api/teammates", tags=["teammates"])
 
@@ -47,7 +49,7 @@ async def list_teammates(db: AsyncSession = Depends(get_db)):
     return data
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def create_teammate(data: dict, db: AsyncSession = Depends(get_db)):
     teammate = Teammate(
         name=data["name"],
@@ -89,7 +91,7 @@ async def get_teammate(teammate_id: str, db: AsyncSession = Depends(get_db)):
     return data
 
 
-@router.patch("/{teammate_id}")
+@router.patch("/{teammate_id}", dependencies=[Depends(require_admin)])
 async def update_teammate(teammate_id: str, data: dict, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Teammate).where(Teammate.id == teammate_id))
     t = result.scalar_one_or_none()
@@ -113,7 +115,7 @@ async def update_teammate(teammate_id: str, data: dict, db: AsyncSession = Depen
     return {"ok": True}
 
 
-@router.delete("/{teammate_id}")
+@router.delete("/{teammate_id}", dependencies=[Depends(require_admin)])
 async def delete_teammate(teammate_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Teammate).where(Teammate.id == teammate_id))
     t = result.scalar_one_or_none()

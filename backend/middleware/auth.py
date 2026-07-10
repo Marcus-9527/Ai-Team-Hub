@@ -6,17 +6,50 @@ Provides:
   - Request-ID tracking per tenant
   - Workspace isolation enforcement
 """
+import os
 import uuid
 import time
 import logging
-from fastapi import Request, Security
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, HTTPException, Header, Request, Security
+from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 logger = logging.getLogger("auth")
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+# ── Admin key for sensitive management endpoints ──
+# If AI_TEAM_HUB_ADMIN_KEY is unset, management endpoints stay OPEN (legacy
+# dev behavior — existing frontend keeps working). If set, clients must send
+# `Authorization: Bearer <key>` or `X-Admin-Key: <key>`.
+ADMIN_KEY_ENV = "AI_TEAM_HUB_ADMIN_KEY"
+_admin_scheme = HTTPBearer(auto_error=False)
+
+
+async def require_admin(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    creds: HTTPAuthorizationCredentials | None = Depends(_admin_scheme),
+):
+    """Gate sensitive management endpoints behind an admin key.
+
+    Open by default (no key configured) to preserve existing frontend behavior;
+    enforced when AI_TEAM_HUB_ADMIN_KEY is set in the environment.
+    """
+    admin_key = os.environ.get(ADMIN_KEY_ENV, "").strip()
+    if not admin_key:
+        return  # open mode
+    provided = None
+    if authorization and authorization.startswith("Bearer "):
+        provided = authorization[7:].strip()
+    if provided is None and creds and creds.credentials:
+        provided = creds.credentials
+    if provided is None:
+        provided = x_admin_key
+    if provided != admin_key:
+        raise HTTPException(status_code=403, detail="Admin authentication required")
 
 
 class RequestContext:

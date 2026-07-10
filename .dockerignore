@@ -1,0 +1,48 @@
+# Secrets — NEVER ship
+.or_key_b64
+.cf_token
+.or_key
+*.pem
+*.key
+.crypto_key
+.env
+.env.*
+!.env.example
+deploy/.env
+
+# Python
+backend/venv/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Data / runtime state
+data/
+.wrangler/
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Build caches
+.vite/
+.cache/
+.codegraph/

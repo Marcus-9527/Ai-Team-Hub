@@ -25,11 +25,17 @@ Provides:
   GET    /api/workspaces/{id}/context      — Context state
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
+from backend.middleware.auth import require_admin
+
+router = APIRouter(
+    prefix="/api/workspaces",
+    tags=["workspaces"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ═══════════════════════════════════════════════════════════

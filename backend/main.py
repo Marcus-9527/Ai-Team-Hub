@@ -149,11 +149,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend dev server
+# CORS — origins are configurable via CORS_ORIGINS (comma-separated).
+# IMPORTANT: wildcard "*" is incompatible with allow_credentials=True; when
+# credentials are used we must echo a concrete origin. When CORS_ORIGINS is
+# omitted we default to open dev mode but drop credentials to stay RFC-compliant.
+import os as _os
+
+_cors_raw = _os.environ.get("CORS_ORIGINS", "")
+if _cors_raw.strip():
+    _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+    _cors_credentials = True
+else:
+    # Open dev mode: allow any origin but WITHOUT credentials (valid combination)
+    _cors_origins = ["*"]
+    _cors_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://127.0.0.1:3000", "*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

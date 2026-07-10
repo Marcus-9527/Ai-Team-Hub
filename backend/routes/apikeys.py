@@ -11,11 +11,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.middleware.auth import require_admin
 from backend.services import key_vault_service as kvs
 
 logger = logging.getLogger("apikeys")
 
-router = APIRouter(prefix="/api/apikeys", tags=["apikeys"])
+router = APIRouter(
+    prefix="/api/apikeys",
+    tags=["apikeys"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @router.get("")

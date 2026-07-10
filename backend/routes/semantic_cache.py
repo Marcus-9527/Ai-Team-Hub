@@ -9,9 +9,11 @@ Provides:
   DELETE /api/semantic-cache/clear  — Clear all caches
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional, Any
+
+from backend.middleware.auth import require_admin
 
 from backend.services.kernel.cache_kernel import (
     normalize_request,
@@ -116,7 +118,7 @@ async def lookup(req: LookupRequest):
     }
 
 
-@router.post("/store")
+@router.post("/store", dependencies=[Depends(require_admin)])
 async def store(req: StoreRequest):
     """Manually store a value in semantic cache."""
     normalized = normalize_request(req.text)
@@ -143,7 +145,7 @@ async def store(req: StoreRequest):
     }
 
 
-@router.delete("/clear")
+@router.delete("/clear", dependencies=[Depends(require_admin)])
 async def clear(layer: Optional[str] = None):
     """Clear semantic caches."""
     mlc = get_multi_layer_cache()

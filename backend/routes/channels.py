@@ -9,6 +9,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from backend.database import get_db
 from backend.models import Channel, Teammate
 from backend.cache import channel_cache, teammate_cache
+from backend.middleware.auth import require_admin
+from fastapi import Depends
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
@@ -42,7 +44,7 @@ async def list_channels(db: AsyncSession = Depends(get_db)):
     return data
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def create_channel(data: dict, db: AsyncSession = Depends(get_db)):
     channel = Channel(
         name=data["name"],
@@ -76,7 +78,7 @@ async def get_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     return data
 
 
-@router.patch("/{channel_id}")
+@router.patch("/{channel_id}", dependencies=[Depends(require_admin)])
 async def update_channel(channel_id: str, data: dict, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     ch = result.scalar_one_or_none()
@@ -94,7 +96,7 @@ async def update_channel(channel_id: str, data: dict, db: AsyncSession = Depends
     return {"ok": True}
 
 
-@router.delete("/{channel_id}")
+@router.delete("/{channel_id}", dependencies=[Depends(require_admin)])
 async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     ch = result.scalar_one_or_none()
@@ -108,7 +110,7 @@ async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/{channel_id}/teammates/{teammate_id}")
+@router.post("/{channel_id}/teammates/{teammate_id}", dependencies=[Depends(require_admin)])
 async def add_teammate_to_channel(channel_id: str, teammate_id: str, db: AsyncSession = Depends(get_db)):
     """Add an AI teammate to a channel."""
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
@@ -135,7 +137,7 @@ async def add_teammate_to_channel(channel_id: str, teammate_id: str, db: AsyncSe
     return {"ok": True, "teammate_ids": ids}
 
 
-@router.delete("/{channel_id}/teammates/{teammate_id}")
+@router.delete("/{channel_id}/teammates/{teammate_id}", dependencies=[Depends(require_admin)])
 async def remove_teammate_from_channel(channel_id: str, teammate_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     ch = result.scalar_one_or_none()

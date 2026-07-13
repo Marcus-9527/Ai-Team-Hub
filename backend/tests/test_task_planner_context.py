@@ -556,9 +556,9 @@ class TestDriverIntegration:
     @pytest.mark.asyncio
     async def test_context_dict_in_generate_plan(self):
         """Context dict from PlannerContext works in generate_plan."""
-        from backend.tests.test_task_planner import FakeMAEOS, _valid_plan_json
+        from backend.tests.test_task_planner import FakeRuntime, _valid_plan_json
 
-        maeos = FakeMAEOS(result_text=_valid_plan_json(task_id="task-001"))
+        maeos = FakeRuntime(result_text=_valid_plan_json(task_id="task-001"))
 
         ctx = PlannerContext(
             task_context="Build auth system",
@@ -581,9 +581,9 @@ class TestDriverIntegration:
     @pytest.mark.asyncio
     async def test_empty_context_backward_compat(self):
         """Empty context dict still works (backward compat)."""
-        from backend.tests.test_task_planner import FakeMAEOS, _valid_plan_json
+        from backend.tests.test_task_planner import FakeRuntime, _valid_plan_json
 
-        maeos = FakeMAEOS(result_text=_valid_plan_json())
+        maeos = FakeRuntime(result_text=_valid_plan_json())
 
         plan = await generate_plan(maeos, goal="Build auth", context={})
         assert isinstance(plan, TaskPlan)

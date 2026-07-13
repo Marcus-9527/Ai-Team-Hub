@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Key, Trash2,
+  X, Key, Trash2, Users,
   Plus, Check, Globe,
 } from 'lucide-react';
 import * as api from '../../services/api';
@@ -9,7 +9,13 @@ import { CHINESE_PROVIDERS, OVERSEAS_PROVIDERS } from '../../services/providers'
 import { useTranslation, SUPPORTED_LANGUAGES } from '../../i18n';
 import ConfirmDialog from '../ConfirmDialog';
 
-export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLang }) {
+const USER_MODES = [
+  { id: 'user',      label: '普通用户',   desc: '默认模式，隐藏开发者功能' },
+  { id: 'expert',    label: '专家模式',   desc: '进阶操作选项' },
+  { id: 'developer', label: 'Developer Mode', desc: '显示技术统计与 Runtime 页面' },
+];
+
+export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLang, userMode = 'user', setUserMode }) {
   const t = useTranslation();
   const [tab, setTab] = useState('apikeys');
   const [apiKeys, setApiKeys] = useState([]);
@@ -20,6 +26,10 @@ export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLan
   const [newKeyValue, setNewKeyValue] = useState('');
   const [showKey, setShowKey] = useState({});
   const [confirm, setConfirm] = useState(null);
+
+  // 专家模式偏好（存本地，不触碰后端）
+  const [execPref, setExecPref] = useState(() => localStorage.getItem('aihub_exec_pref') || 'parallel');
+  const persist = (k, v) => localStorage.setItem(k, v);
 
   useEffect(() => { loadData(); }, []);
 
@@ -71,6 +81,7 @@ export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLan
           {[
             { id: 'apikeys', label: t('settings.api_keys'), icon: Key },
             { id: 'language', label: t('settings.language'), icon: Globe },
+            { id: 'mode', label: t('settings.mode'), icon: Users },
           ].map(tabItem => (
             <button
               key={tabItem.id}
@@ -179,6 +190,63 @@ export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLan
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ── User Mode Tab ── */}
+        {tab === 'mode' && (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-mute mb-4">{t('settings.mode_desc')}</p>
+            {USER_MODES.map(m => (
+              <button
+                key={m.id}
+                onClick={() => setUserMode(m.id)}
+                className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${
+                  userMode === m.id
+                    ? 'border-primary/30 bg-canvas-lavender shadow-sm'
+                    : 'border-hairline hover:border-primary/10 hover:bg-surface-hover'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-ink">{m.label}</p>
+                  <p className="text-[11px] text-ink-faint mt-0.5">{m.desc}</p>
+                </div>
+                {userMode === m.id && <Check size={16} className="text-primary flex-shrink-0" />}
+              </button>
+            ))}
+
+            {/* 专家/开发者模式：额外控制入口；普通模式保持简洁，不显示 */}
+            {userMode !== 'user' && (
+              <div className="pt-4 mt-2 border-t border-hairline space-y-4">
+                <h4 className="text-xs font-bold text-ink uppercase tracking-wider flex items-center gap-2">
+                  {t('settings.expert_controls')}
+                </h4>
+
+                {/* 任务执行偏好 */}
+                <div>
+                  <label className="block text-xs font-semibold text-ink-mute mb-1">{t('settings.exec_pref')}</label>
+                  <p className="text-[11px] text-ink-faint mb-2">{t('settings.exec_pref_desc')}</p>
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'parallel', label: t('settings.exec_pref_parallel') },
+                      { id: 'serial', label: t('settings.exec_pref_serial') },
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => { setExecPref(opt.id); persist('aihub_exec_pref', opt.id); }}
+                        className={`flex-1 px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
+                          execPref === opt.id
+                            ? 'border-primary/30 bg-canvas-lavender text-primary'
+                            : 'border-hairline text-ink-mute hover:bg-surface-hover'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

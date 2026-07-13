@@ -31,6 +31,10 @@ export function isTaskEventType(type) {
     'step_completed',
     'task_completed',
     'approval_required',
+    // QA-2: Task Execution Panel
+    'planning_started',
+    'dag_created',
+    'team_created',
     // V3.0 Phase B: Task Intelligence Dashboard
     'execution_started',
     'execution_completed',

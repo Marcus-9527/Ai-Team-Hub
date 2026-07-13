@@ -47,3 +47,9 @@ data/
 # ── Build caches ──
 .vite/
 .cache/
+
+# ── Project-local junk / local state (never publish) ──
+certs/
+.venv-mcp/
+.codegraph/
+backend/workspaces/

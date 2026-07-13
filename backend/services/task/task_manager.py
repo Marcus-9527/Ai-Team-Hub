@@ -141,20 +141,24 @@ class TaskManager:
     # ── High-Level Lifecycle Operations ──
 
     async def start_planning(self, db: AsyncSession, task_id: str) -> TaskModel:
-        """Move task from CREATED to PLANNING."""
+        """Move task from PENDING/CREATED to PLANNING."""
         return await self.transition_task_status(db, task_id, TaskStatus.PLANNING)
 
+    async def start_assigned(self, db: AsyncSession, task_id: str) -> TaskModel:
+        """Move task from PLANNING to ASSIGNED."""
+        return await self.transition_task_status(db, task_id, TaskStatus.ASSIGNED)
+
     async def start_execution(self, db: AsyncSession, task_id: str) -> TaskModel:
-        """Move task from PLANNING to EXECUTING."""
-        return await self.transition_task_status(db, task_id, TaskStatus.EXECUTING)
+        """Move task from PLANNING/ASSIGNED to RUNNING."""
+        return await self.transition_task_status(db, task_id, TaskStatus.RUNNING)
 
     async def pause(self, db: AsyncSession, task_id: str) -> TaskModel:
-        """Pause a running task (EXECUTING → PAUSED)."""
+        """Pause a running task (RUNNING → PAUSED)."""
         return await self.transition_task_status(db, task_id, TaskStatus.PAUSED)
 
     async def resume(self, db: AsyncSession, task_id: str) -> TaskModel:
-        """Resume a paused task (PAUSED → EXECUTING)."""
-        return await self.transition_task_status(db, task_id, TaskStatus.EXECUTING)
+        """Resume a paused task (PAUSED → RUNNING)."""
+        return await self.transition_task_status(db, task_id, TaskStatus.RUNNING)
 
     async def cancel(self, db: AsyncSession, task_id: str) -> TaskModel:
         """Cancel a task (any active state → CANCELLED)."""

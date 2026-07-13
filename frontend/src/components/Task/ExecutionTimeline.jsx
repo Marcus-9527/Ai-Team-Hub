@@ -13,8 +13,10 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import { subscribeTaskEvents } from '../../services/taskEventBus';
+import { useTranslation } from '../../i18n';
 
 export default function ExecutionTimeline({ taskId }) {
+  const t = useTranslation();
   const [executions, setExecutions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,8 +58,8 @@ export default function ExecutionTimeline({ taskId }) {
     return (
       <div className="text-center py-12">
         <Activity size={32} className="mx-auto mb-2 text-ink-faint opacity-40" />
-        <p className="text-sm text-ink-faint">暂无执行记录</p>
-        <p className="text-xs text-ink-faint mt-1">任务执行后这里会显示时间线</p>
+        <p className="text-sm text-ink-faint">{t('task.execution.empty')}</p>
+        <p className="text-xs text-ink-faint mt-1">{t('task.execution.empty_hint')}</p>
       </div>
     );
   }
@@ -106,14 +108,14 @@ export default function ExecutionTimeline({ taskId }) {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
                 {ex.tokens != null && (
                   <div className="bg-gray-50 rounded-lg px-3 py-2">
-                    <div className="text-[10px] text-ink-faint">Token</div>
+                    <div className="text-[10px] text-ink-faint">{t('task.token')}</div>
                     <div className="text-xs font-semibold text-ink">{ex.tokens.toLocaleString()}</div>
                   </div>
                 )}
                 {ex.cost != null && (
                   <div className="bg-gray-50 rounded-lg px-3 py-2">
                     <div className="text-[10px] text-ink-faint flex items-center gap-1">
-                      <DollarSign size={10} /> 成本
+                      <DollarSign size={10} /> {t('task.cost')}
                     </div>
                     <div className="text-xs font-semibold text-ink">${ex.cost.toFixed(4)}</div>
                   </div>
@@ -121,14 +123,14 @@ export default function ExecutionTimeline({ taskId }) {
                 {ex.duration != null && (
                   <div className="bg-gray-50 rounded-lg px-3 py-2">
                     <div className="text-[10px] text-ink-faint flex items-center gap-1">
-                      <Clock size={10} /> 耗时
+                      <Clock size={10} /> {t('task.duration')}
                     </div>
                     <div className="text-xs font-semibold text-ink">{ex.duration}ms</div>
                   </div>
                 )}
                 {ex.status && (
                   <div className="bg-gray-50 rounded-lg px-3 py-2">
-                    <div className="text-[10px] text-ink-faint">状态</div>
+                    <div className="text-[10px] text-ink-faint">{t('task.status_label')}</div>
                     <div className={`text-xs font-semibold flex items-center gap-1 ${
                       ex.status === 'completed' || ex.status === 'success'
                         ? 'text-green-600'
@@ -143,7 +145,7 @@ export default function ExecutionTimeline({ taskId }) {
                       ) : (
                         <Activity size={12} />
                       )}
-                      {ex.status}
+                      {t('task.status.' + ex.status)}
                     </div>
                   </div>
                 )}
@@ -152,7 +154,7 @@ export default function ExecutionTimeline({ taskId }) {
               {/* Trace */}
               {ex.trace_id && (
                 <div className="mt-2 text-[10px] text-ink-faint">
-                  Trace: <code className="font-mono bg-gray-100 px-1 rounded">{ex.trace_id}</code>
+                {t('task.trace')} <code className="font-mono bg-gray-100 px-1 rounded">{ex.trace_id}</code>
                 </div>
               )}
             </div>

@@ -20,6 +20,7 @@ from backend.services.memory.memory_event_handler import MemoryTaskHook
 from backend.services.memory.memory_insight import MemoryInsight, InsightType, MemoryInsightEngine
 from backend.services.memory.memory_insight_store import MemoryInsightStore
 from backend.services.memory.memory_intelligence import MemoryIntelligenceService
+from backend.services.memory.memory_context import MemoryContext, get_memory_context
 
 __all__ = [
     "MemoryType",
@@ -38,4 +39,6 @@ __all__ = [
     "MemoryInsightEngine",
     "MemoryInsightStore",
     "MemoryIntelligenceService",
+    "MemoryContext",
+    "get_memory_context",
 ]

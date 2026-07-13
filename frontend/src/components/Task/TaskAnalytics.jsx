@@ -11,8 +11,10 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import { subscribeTaskEvents } from '../../services/taskEventBus';
+import { useTranslation } from '../../i18n';
 
-function StatCard({ icon: Icon, label, value, sub, color }) {
+function StatCard({ icon: Icon, labelKey, value, sub, color }) {
+  const t = useTranslation();
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -25,13 +27,14 @@ function StatCard({ icon: Icon, label, value, sub, color }) {
         </div>
       </div>
       <div className="text-lg font-bold text-ink">{value ?? '-'}</div>
-      <div className="text-[11px] text-ink-faint mt-0.5">{label}</div>
+      <div className="text-[11px] text-ink-faint mt-0.5">{t(labelKey)}</div>
       {sub != null && <div className="text-[10px] text-ink-faint mt-0.5">{sub}</div>}
     </motion.div>
   );
 }
 
 export default function TaskAnalytics({ taskId }) {
+  const t = useTranslation();
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -77,8 +80,8 @@ export default function TaskAnalytics({ taskId }) {
     return (
       <div className="text-center py-12">
         <BarChart3 size={32} className="mx-auto mb-2 text-ink-faint opacity-40" />
-        <p className="text-sm text-ink-faint">暂无分析数据</p>
-        <p className="text-xs text-ink-faint mt-1">任务执行后这里会显示聚合统计</p>
+        <p className="text-sm text-ink-faint">{t('task.analytics.empty')}</p>
+        <p className="text-xs text-ink-faint mt-1">{t('task.analytics.empty_hint')}</p>
       </div>
     );
   }
@@ -89,26 +92,26 @@ export default function TaskAnalytics({ taskId }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           icon={Activity}
-          label="执行数量"
+          labelKey="task.analytics.exec_count"
           value={analytics.execution_count ?? analytics.total_executions}
           color="bg-blue-100"
         />
         <StatCard
           icon={TrendingUp}
-          label="成功率"
+          labelKey="task.analytics.success_rate"
           value={analytics.success_rate != null ? `${(analytics.success_rate * 100).toFixed(1)}%` : '-'}
           color="bg-green-100"
         />
         <StatCard
           icon={Star}
-          label="平均质量"
+          labelKey="task.analytics.avg_quality"
           value={analytics.average_quality != null ? analytics.average_quality.toFixed(2) : '-'}
           sub={analytics.average_quality != null ? '/ 5' : undefined}
           color="bg-purple-100"
         />
         <StatCard
           icon={DollarSign}
-          label="总成本"
+          labelKey="task.analytics.total_cost"
           value={analytics.total_cost != null ? `$${analytics.total_cost.toFixed(4)}` : '-'}
           color="bg-amber-100"
         />
@@ -119,12 +122,12 @@ export default function TaskAnalytics({ taskId }) {
         <div className="bg-white rounded-xl border border-hairline p-4">
           <div className="flex items-center gap-2 mb-3">
             <Cpu size={15} className="text-ink-faint" />
-            <h4 className="text-xs font-bold text-ink">Token 消耗</h4>
+            <h4 className="text-xs font-bold text-ink">{t('task.analytics.token_usage')}</h4>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <div className="flex items-center justify-between text-xs text-ink-mute mb-1">
-                <span>已使用</span>
+                <span>{t('task.analytics.used')}</span>
                 <span className="font-semibold text-ink">{analytics.total_tokens.toLocaleString()}</span>
               </div>
               {/* Visual bar */}
@@ -144,7 +147,7 @@ export default function TaskAnalytics({ taskId }) {
       {/* Summary footer */}
       <div className="bg-gray-50 rounded-xl border border-hairline p-3 text-center">
         <p className="text-[11px] text-ink-faint">
-          任务: {analytics.task_title || taskId} · 状态: {analytics.task_status || '-'}
+          {t('task.analytics.summary', analytics.task_title || taskId, analytics.task_status || '-')}
         </p>
       </div>
     </div>

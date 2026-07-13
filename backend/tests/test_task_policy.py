@@ -354,7 +354,7 @@ class TestExecutorPolicyIntegration:
 
         executor = TaskExecutor()
         with pytest.raises(ApprovalRequiredError):
-            await executor._execute_single_step(
+            await executor._submit_one(
                 db_session, task, step,
                 trace=None,
                 events=events,
@@ -381,7 +381,7 @@ class TestExecutorPolicyIntegration:
 
         executor = TaskExecutor()
         with pytest.raises(PolicyBlockedError):
-            await executor._execute_single_step(
+            await executor._submit_one(
                 db_session, task, step,
                 trace=None,
                 events=events,

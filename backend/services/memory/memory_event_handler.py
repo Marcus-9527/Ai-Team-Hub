@@ -227,6 +227,26 @@ class MemoryTaskHook(TaskHook):
         )
         await self._store(item, "TASK_COMPLETED")
 
+        # ── Phase 13: Summary memory ──
+        summary = MemoryItem(
+            memory_type=MemoryType.GLOBAL if ctx.workspace_id else MemoryType.TASK,
+            content=(
+                f"[Summary] Task \"{ctx.task_title}\" completed: "
+                f"{ctx.task_status}. {ctx.task_description}"
+            )[:self.max_chars],
+            source_id=ctx.task_id,
+            relevance_score=0.75,
+            metadata={
+                "event": "POST_TASK_SUMMARY",
+                "title": ctx.task_title,
+                "status": ctx.task_status,
+                "channel_id": ctx.channel_id,
+                "workspace_id": ctx.workspace_id,
+                "scope": "workspace" if ctx.workspace_id else "private",
+            },
+        )
+        await self._store(summary, "POST_TASK_SUMMARY")
+
         # ── V2.7 Phase C: Trigger insight generation (fire-and-forget) ──
         asyncio.ensure_future(self._trigger_intelligence(ctx.task_id))
 
@@ -327,6 +347,56 @@ class MemoryTaskHook(TaskHook):
         )
         await self._store(item, "EXECUTION_COMPLETED")
 
+        # ── Phase 13: Post-execution decision + experience memory ──
+        await self._store_post_execution_memories(ctx)
+
+    # ── Phase 13: Post-execution auto-generation ──
+
+    async def _store_post_execution_memories(self, ctx: TaskHookContext) -> None:
+        """Generate decision + experience memories after an execution completes."""
+        # Decision memory: key takeaway from this execution
+        decision = MemoryItem(
+            memory_type=MemoryType.DECISION,
+            content=(
+                f"Step {ctx.step_order} ({ctx.step_objective}): "
+                f"outcome={ctx.execution_outcome}, "
+                f"duration={ctx.execution_duration_ms}ms"
+            )[:self.max_chars],
+            source_id=ctx.task_id,
+            relevance_score=0.7,
+            metadata={
+                "event": "POST_EXECUTION_DECISION",
+                "task_id": ctx.task_id,
+                "step_id": ctx.step_id,
+                "step_order": ctx.step_order,
+                "outcome": ctx.execution_outcome,
+                "teammate_id": ctx.execution_teammate_id,
+                "scope": "private",
+            },
+        )
+        await self._store(decision, "POST_EXEC_DECISION")
+
+        # Experience memory: performance signal for future similar tasks
+        experience = MemoryItem(
+            memory_type=MemoryType.EXECUTION,
+            content=(
+                f"Experience: {ctx.step_objective} → {ctx.execution_outcome} "
+                f"({ctx.execution_duration_ms}ms, {ctx.execution_total_tokens}tok)"
+            )[:self.max_chars],
+            source_id=ctx.task_id,
+            relevance_score=0.65,
+            metadata={
+                "event": "POST_EXECUTION_EXPERIENCE",
+                "task_id": ctx.task_id,
+                "step_id": ctx.step_id,
+                "teammate_id": ctx.execution_teammate_id,
+                "scope": "private",
+                "outcome": ctx.execution_outcome,
+                "duration_ms": ctx.execution_duration_ms,
+            },
+        )
+        await self._store(experience, "POST_EXEC_EXPERIENCE")
+
     # ── PLAN_APPROVED ────────────────────────────────────────────
 
     async def on_plan_approved(self, ctx: TaskHookContext) -> None:
@@ -362,8 +432,12 @@ class MemoryTaskHook(TaskHook):
     async def _store(self, item: MemoryItem, event_label: str) -> None:
         """
         Buffer a single MemoryItem for batch persistence.
+        Auto-computes embedding vector for semantic search if not already set.
         Actual DB write happens on batch flush (threshold or timeout).
         """
+        if not item.embedding and item.content:
+            from backend.services.memory.memory_service import MemoryService
+            item.embedding = MemoryService.compute_embedding(item.content)
         await self._buffer.add(item)
         logger.debug(f"[MEMORY-EVENT] {event_label} → buffered {item.id}")
 

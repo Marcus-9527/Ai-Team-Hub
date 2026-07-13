@@ -59,7 +59,7 @@ class TaskStateManager:
             priority=priority,
             intent=intent,
             created_by=created_by,
-            status=TaskStatus.CREATED,
+            status=TaskStatus.PENDING,
         )
         db.add(task)
         await db.flush()
@@ -84,6 +84,7 @@ class TaskStateManager:
         result = await db.execute(
             select(TaskModel)
             .where(TaskModel.id == task_id)
+            .options(selectinload(TaskModel.steps))
         )
         return result.scalar_one_or_none()
 

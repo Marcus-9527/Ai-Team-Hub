@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Bot, Upload, FileText, Sparkles, ChevronDown,
   ChevronRight, Check, Eye, EyeOff, BookOpen,
-  Zap, Code2, Palette, Brain, Shield, ArrowLeft, Search, Loader,
+  Zap, Code2, Palette, Brain, Shield, ArrowLeft,
 } from 'lucide-react';
 import * as api from '../../services/api';
-import { CHINESE_PROVIDERS, OVERSEAS_PROVIDERS, getProviderModels, getProviderModelsSync, getProviderName, clearModelCache } from '../../services/providers';
+import { clearModelCache } from '../../services/providers';
 import { useTranslation } from '../../i18n';
 
 /* ─── Built-in Prompt Templates (去AI化) ─── */
@@ -63,13 +63,8 @@ export default function CreateTeammateView({ onDone, onCancel }) {
   const [showPreview, setShowPreview] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [modelList, setModelList] = useState([]);
-  const [modelLoading, setModelLoading] = useState(false);
-  const [modelSearch, setModelSearch] = useState('');
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const fileInputRef = useRef(null);
   const promptRef = useRef(null);
-  const modelDropdownRef = useRef(null);
 
   useEffect(() => {
     api.listAPIKeys().then(setApiKeys).catch(() => {});
@@ -77,38 +72,6 @@ export default function CreateTeammateView({ onDone, onCancel }) {
       setTimeout(() => promptRef.current?.focus(), 300);
     }
   }, [step]);
-
-  // 动态加载模型列表
-  useEffect(() => {
-    let cancelled = false;
-    setModelLoading(true);
-    setModelList([]);
-    setModelSearch('');
-    getProviderModels(provider, selectedKey).then(models => {
-      if (!cancelled) {
-        setModelList(models);
-        setModelLoading(false);
-        // 自动选第一个
-        if (models.length > 0 && !models[0].id.startsWith('输入')) {
-          setModel(models[0].id);
-        }
-      }
-    }).catch(() => {
-      if (!cancelled) setModelLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [provider, selectedKey]);
-
-  // 点击外部关闭下拉
-  useEffect(() => {
-    const handler = (e) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target)) {
-        setShowModelDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
 
   // ── File handling ──
   const readFile = (file) => {
@@ -264,128 +227,23 @@ export default function CreateTeammateView({ onDone, onCancel }) {
                 autoFocus
               />
 
-              {/* Model config */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-xs font-semibold text-ink-mute uppercase tracking-wide mb-2">{t("teammate.provider")}</label>
-                  <select
-                    value={provider}
-                    onChange={e => {
-                      const p = e.target.value;
-                      setProvider(p);
-                      setModel('');
-                      setModelList([]);
-                    }}
-                    className="w-full px-4 py-3 rounded-xl bg-surface border border-hairline text-sm
-                               focus:outline-none focus:ring-2 focus:ring-primary/10"
-                  >
-                    <optgroup label={t("teammate.providers_cn")}>
-                      {CHINESE_PROVIDERS.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label={t("teammate.providers_overseas")}>
-                      {OVERSEAS_PROVIDERS.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-ink-mute uppercase tracking-wide mb-2">{t("teammate.model")}</label>
-                  <div className="relative" ref={modelDropdownRef}>
-                    <div
-                      className="w-full px-4 py-3 pr-10 rounded-xl bg-surface border border-hairline text-sm
-                                 focus-within:ring-2 focus-within:ring-primary/10 cursor-pointer flex items-center gap-2"
-                      onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    >
-                      {modelLoading ? (
-                        <Loader size={14} className="animate-spin text-ink-faint" />
-                      ) : (
-                        <span className={model ? 'text-ink' : 'text-ink-faint/50'}>
-                          {model || '选择模型...'}
-                        </span>
-                      )}
-                      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-                    </div>
-
-                    {showModelDropdown && (
-                      <div className="absolute left-0 right-0 top-full mt-1 bg-surface rounded-xl shadow-card-lg border border-hairline z-50 overflow-hidden">
-                        {/* 搜索框 */}
-                        <div className="p-2 border-b border-hairline">
-                          <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
-                            <input
-                              autoFocus
-                              value={modelSearch}
-                              onChange={e => setModelSearch(e.target.value)}
-                              placeholder={t("teammate.model_search_placeholder")}
-                              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-canvas border border-hairline
-                                         focus:outline-none focus:ring-1 focus:ring-primary/20 placeholder:text-ink-faint/50"
-                              onClick={e => e.stopPropagation()}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2 mt-1.5 px-1">
-                            <button
-                              onClick={e => { e.stopPropagation(); setModelSearch(''); }}
-                              className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${!modelSearch.includes('🆓') ? 'bg-primary/10 border-primary/20 text-primary' : 'border-hairline text-ink-faint hover:bg-surface-hover'}`}
-                            >
-                              {t("teammate.all")} ({modelList.length})
-                            </button>
-                            <button
-                              onClick={e => { e.stopPropagation(); setModelSearch('🆓'); }}
-                              className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${modelSearch === '🆓' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'border-hairline text-ink-faint hover:bg-surface-hover'}`}
-                            >
-                              {t("teammate.free")} ({modelList.filter(m => m.is_free).length})
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 模型列表 */}
-                        <div className="max-h-72 overflow-y-auto">
-                          {modelLoading ? (
-                            <div className="flex items-center justify-center py-8">
-                              <Loader size={18} className="animate-spin text-ink-faint" />
-                              <span className="ml-2 text-xs text-ink-faint">{t("teammate.loading_models")}</span>
-                            </div>
-                          ) : (
-                            (() => {
-                              const search = modelSearch.replace(/🆓/g, '').trim().toLowerCase();
-                              const showFreeOnly = modelSearch.includes('🆓');
-                              const filtered = modelList.filter(m => {
-                                if (showFreeOnly && !m.is_free) return false;
-                                if (search && !m.id.toLowerCase().includes(search) && !m.name.toLowerCase().includes(search)) return false;
-                                return true;
-                              });
-                              if (filtered.length === 0) {
-                                return <p className="text-xs text-ink-faint text-center py-6">{t("teammate.no_models_found")}</p>;
-                              }
-                              return filtered.map(m => (
-                                <button
-                                  key={m.id}
-                                  onClick={() => { setModel(m.id); setShowModelDropdown(false); setModelSearch(''); }}
-                                  className={`w-full text-left px-3 py-2 text-xs hover:bg-surface-hover transition-colors flex items-center justify-between gap-2
-                                    ${model === m.id ? 'text-primary font-semibold bg-canvas-lavender' : 'text-ink'}`}
-                                >
-                                  <div className="flex-1 min-w-0">
-                                    <code className="font-mono text-[11px] block truncate">{m.id}</code>
-                                    {m.context_length > 0 && (
-                                      <span className="text-[9px] text-ink-faint">{(m.context_length / 1000).toFixed(0)}K ctx</span>
-                                    )}
-                                  </div>
-                                  {m.is_free && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-semibold shrink-0">FREE</span>
-                                  )}
-                                </button>
-                              ));
-                            })()
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-ink-faint mt-1">{t("teammate.model_hint")}</p>
-                </div>
+              {/* AI 服务商 + 模型：自定义两步式选择器，替代原生 select */}
+              <div className="mb-4">
+                <ModelSelector
+                  provider={provider}
+                  model={model}
+                  onProviderChange={(p) => { setProvider(p); setModel(''); }}
+                  onModelChange={setModel}
+                  apiKeys={apiKeys}
+                  selectedKey={selectedKey}
+                  onKeyChange={(k) => {
+                    setSelectedKey(k);
+                    clearModelCache();
+                    const key = apiKeys.find(x => x.id === k);
+                    if (key && key.provider) { setProvider(key.provider); setModel(''); }
+                  }}
+                />
+                <p className="text-[10px] text-ink-faint mt-1">{t("teammate.model_hint")}</p>
               </div>
 
               {/* API Key selector */}

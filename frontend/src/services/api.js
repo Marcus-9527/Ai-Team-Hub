@@ -57,9 +57,12 @@ export const listAPIKeys = () => request('/api/apikeys');
 export const createAPIKey = (data) => request('/api/apikeys', { method: 'POST', body: JSON.stringify(data) });
 export const deleteAPIKey = (id) => request(`/api/apikeys/${id}`, { method: 'DELETE' });
 
-// ── Teammates ──
+// ── Teams ──
+export const createTeamFromTemplate = (data) =>
+  request('/api/teams/template', { method: 'POST', body: JSON.stringify(data) });
 export const listTeammates = () => request('/api/teammates');
 export const createTeammate = (data) => request('/api/teammates', { method: 'POST', body: JSON.stringify(data) });
+export const updateTeammate = (id, data) => request(`/api/teammates/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteTeammate = (id) => request(`/api/teammates/${id}`, { method: 'DELETE' });
 export const addTeammateToChannel = (channelId, teammateId) =>
   request(`/api/channels/${channelId}/teammates/${teammateId}`, { method: 'POST' });
@@ -79,9 +82,111 @@ export const fetchAllModels = () => request('/api/models');
 export const triggerModelSync = () => request('/api/models/sync', { method: 'POST' });
 
 export const fetchOpenRouterModels = async () => {
-  // 走后端代理避免 CORS
   const data = await request('/api/models/openrouter');
-  // 后端返回 {provider, models: [...], count}
   const list = data?.models || [];
   return list.map(m => ({ id: m.id, name: m.name || m.id, context_length: m.context_length, is_free: m.is_free, pricing: m.pricing }));
 };
+
+// ── Brain API (Phase 12) ──
+export const listBrainFragments = (teammateId) => request(`/api/brain/fragments/${teammateId}`);
+export const getBrainFragment = (teammateId, fragmentType) => request(`/api/brain/fragments/${teammateId}/${fragmentType}`);
+export const listBrainFragmentVersions = (teammateId, fragmentType) =>
+  request(`/api/brain/fragments/${teammateId}/${fragmentType}/versions`);
+export const rollbackBrainFragment = (teammateId, fragmentType, targetVersion) =>
+  request(`/api/brain/fragments/${teammateId}/${fragmentType}/rollback?target_version=${targetVersion}`, { method: 'POST' });
+export const getBrainLoaderPrompt = (teammateId, extraContext = '') =>
+  request(`/api/brain/loader/${teammateId}?extra_context=${encodeURIComponent(extraContext)}`);
+export const listBrainFragmentTypes = () => request('/api/brain/fragment-types');
+export const getBrainOverview = () => request('/api/brain');
+export const triggerBrainConsolidation = (lookbackHours = 48) =>
+  request(`/api/brain/consolidate?lookback_hours=${lookbackHours}`, { method: 'POST' });
+
+// ── Phase 22: Teammate Profile ──
+export const getTeammateProfile = (teammateId) =>
+  request(`/api/teammates/${teammateId}/profile`);
+
+// ── Phase 22: Execution Room ──
+export const listExecutions = (status = '', limit = 20, offset = 0) => {
+  let url = '/api/executions?';
+  if (status) url += `status=${status}&`;
+  url += `limit=${limit}&offset=${offset}`;
+  return request(url);
+};
+export const getExecution = (executionId) =>
+  request(`/api/executions/${executionId}`);
+
+// ── Phase 22: Workspace Explorer ──
+export const listArtifacts = (taskId = '', type = '', limit = 50) => {
+  let url = '/api/artifacts?';
+  if (taskId) url += `task_id=${taskId}&`;
+  if (type) url += `type=${type}&`;
+  url += `limit=${limit}`;
+  return request(url);
+};
+
+// ── Phase 13: Autonomous Collaboration ──
+
+// Teammate Runtime State
+export const listTeammateStates = (filterState = '') =>
+  request(`/api/autonomous/states${filterState ? `?filter_state=${filterState}` : ''}`);
+export const getTeammateState = (teammateId) =>
+  request(`/api/autonomous/states/${teammateId}`);
+export const setTeammateState = (teammateId, state, taskId = '') =>
+  request('/api/autonomous/states', {
+    method: 'POST',
+    body: JSON.stringify({ teammate_id: teammateId, state, task_id: taskId }),
+  });
+
+// Cede Protocol
+export const cedeDecide = (teammateId, teammateName, message, channelId = '', messageId = '') =>
+  request('/api/autonomous/cede/decide', {
+    method: 'POST',
+    body: JSON.stringify({ teammate_id: teammateId, teammate_name: teammateName, message, channel_id: channelId, message_id: messageId }),
+  });
+export const getCedeDecisions = (messageId) =>
+  request(`/api/autonomous/cede/decisions/${messageId}`);
+
+// Task Claim
+export const claimTask = (taskId, teammateId, teammateName = '', reason = '') =>
+  request('/api/autonomous/claim', {
+    method: 'POST',
+    body: JSON.stringify({ task_id: taskId, teammate_id: teammateId, teammate_name: teammateName, reason }),
+  });
+export const getTaskClaims = (taskId) => request(`/api/autonomous/claim/${taskId}`);
+
+// Event Wakeup
+export const fireWakeupEvent = (eventType, taskId = '', teammateId = '', reason = '') =>
+  request('/api/autonomous/event', {
+    method: 'POST',
+    body: JSON.stringify({ event_type: eventType, task_id: taskId, teammate_id: teammateId, reason }),
+  });
+export const getWakeupEvents = (eventType = '', limit = 20) =>
+  request(`/api/autonomous/events${eventType ? `?event_type=${eventType}` : ''}&limit=${limit}`);
+
+// Brain Proposals
+export const listProposals = (status = '', teammateId = '', limit = 50) => {
+  let url = '/api/autonomous/proposals?';
+  if (status) url += `status=${status}&`;
+  if (teammateId) url += `teammate_id=${teammateId}&`;
+  url += `limit=${limit}`;
+  return request(url);
+};
+export const listPendingProposals = () =>
+  request('/api/autonomous/proposals/pending');
+export const getProposal = (proposalId) =>
+  request(`/api/autonomous/proposals/${proposalId}`);
+export const createProposal = (teammateId, targetType, targetLabel, proposedContent, originalContent = '', taskId = '', reason = '') =>
+  request('/api/autonomous/proposals', {
+    method: 'POST',
+    body: JSON.stringify({ teammate_id: teammateId, target_type: targetType, target_label: targetLabel, proposed_content: proposedContent, original_content: originalContent, task_id: taskId, reason }),
+  });
+export const approveProposal = (proposalId, resolvedBy = 'user') =>
+  request('/api/autonomous/proposals/approve', {
+    method: 'POST',
+    body: JSON.stringify({ proposal_id: proposalId, resolved_by: resolvedBy }),
+  });
+export const rejectProposal = (proposalId, resolvedBy = 'user') =>
+  request('/api/autonomous/proposals/reject', {
+    method: 'POST',
+    body: JSON.stringify({ proposal_id: proposalId, resolved_by: resolvedBy }),
+  });

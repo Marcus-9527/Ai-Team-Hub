@@ -74,55 +74,51 @@ def make_execution(step_id="step-001", attempt=1, **kwargs) -> TaskExecutionMode
     return TaskExecutionModel(**defaults)
 
 
-# Mock MAEOS task result
-class FakeMAEOSTask:
-    def __init__(self, task_id: str, status: str = "COMPLETED",
+# Mock ExecutionRuntime: submit returns a task id, wait returns a RuntimeTask.
+class FakeRuntimeTask:
+    def __init__(self, task_id: str = "exec-0001", status: str = "COMPLETED",
                  result: str = "", error: str = ""):
         self.id = task_id
-        self.task_id = task_id
         self.status = status
         self.result = result
         self.error = error
-        self.trace_report = {"trace_id": "trace-001"}
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "status": self.status,
-            "result": self.result,
-            "error": self.error,
-        }
 
 
-class FakeMAEOS:
-    """Mock MAEOS engine that returns predefined results."""
+class FakeRuntime:
+    """Mock ExecutionRuntime used in place of MAEOS."""
 
-    def __init__(self, results: dict[str, str] = None, fail_ids: set[str] = None):
-        self.results = results or {}
+    def __init__(self, result_text: str = "", fail: bool = False,
+                 fail_ids: set = None, fail_count: int = 0,
+                 fail_then_succeed: bool = False):
+        self.result_text = result_text
+        self.fail = fail
         self.fail_ids = fail_ids or set()
-        self._started = True
+        self.fail_count = fail_count
+        self.fail_then_succeed = fail_then_succeed
+        self._call_count = 0
         self.submitted: list[str] = []
 
-    async def submit(self, description: str, priority: int = 2,
-                     intent: str = "", wait: bool = False,
+    async def submit(self, description: str = "", priority: int = 2,
+                     intent: str = "", teammate: str = "",
+                     workspace_id: str = "", wait: bool = False,
                      **kwargs) -> str:
-        task_id = f"maeos-{len(self.submitted) + 1:04d}"
+        self._call_count += 1
+        task_id = f"exec-{self._call_count:04d}"
         self.submitted.append(task_id)
         return task_id
 
-    def get_status(self, task_id: str) -> dict:
+    async def wait(self, task_id: str, timeout: float = 300.0):
+        n = self._call_count
+        if self.fail:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated failure")
         if task_id in self.fail_ids:
-            return {"status": "FAILED", "error": "Simulated failure"}
-        return {"status": "COMPLETED"}
-
-    async def wait(self, task_id: str, timeout: float = 300.0) -> FakeMAEOSTask:
-        if task_id in self.fail_ids:
-            return FakeMAEOSTask(task_id, status="FAILED", error="Simulated MAEOS failure")
-        result = self.results.get(task_id, f"Result for {task_id}")
-        return FakeMAEOSTask(task_id, status="COMPLETED", result=result)
-
-    def stats(self):
-        return {"tasks_submitted": len(self.submitted)}
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated MAEOS failure")
+        if self.fail_then_succeed and n == 1:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        if self.fail_count > 0 and n <= self.fail_count:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        return FakeRuntimeTask(task_id, status="COMPLETED",
+                               result=self.result_text or f"Result for {task_id}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -151,7 +147,7 @@ def result_handler():
 
 @pytest.fixture
 def fake_maeos():
-    return FakeMAEOS()
+    return FakeRuntime()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -328,20 +324,20 @@ class TestTaskExecutor:
     async def test_no_maeos_raises(self, db_session, executor):
         """Executor without MAEOS set raises RuntimeError."""
         task = make_task()
-        with pytest.raises(RuntimeError, match="MAEOS instance not set"):
+        with pytest.raises(RuntimeError, match="ExecutionRuntime not set"):
             await executor.execute_task(db_session, task)
 
     async def test_not_executing_state_raises(self, db_session, executor, fake_maeos):
         """Task not in EXECUTING raises ValueError."""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         task = make_task(status=TaskStatus.CREATED)
-        with pytest.raises(ValueError, match="must be in EXECUTING"):
+        with pytest.raises(ValueError, match="must be in RUNNING"):
             await executor.execute_task(db_session, task)
 
     async def test_no_pending_steps_marks_complete(self, db_session, executor,
                                                     fake_maeos):
         """All steps already completed → task transitions to COMPLETED."""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         completed_step = make_step(status=TaskStepStatus.COMPLETED)
         task = make_task()
         task.steps = [completed_step]
@@ -357,7 +353,7 @@ class TestTaskExecutor:
     async def test_single_step_execution(self, db_session, executor, fake_maeos):
         """Single step: step transitions PENDING→RUNNING→COMPLETED,
         task transitions EXECUTING→COMPLETED."""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         step = make_step()
         task = make_task()
         task.steps = [step]
@@ -389,7 +385,7 @@ class TestTaskExecutor:
 
     async def test_two_steps_sequential(self, db_session, executor, fake_maeos):
         """Two steps: both execute in sequence, step2 gets context from step1."""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         step1 = make_step(order=1, objective="Step 1")
         step2 = make_step(order=2, objective="Step 2")
         task = make_task()
@@ -435,12 +431,12 @@ class TestTaskExecutor:
             result = await executor.execute_task(db_session, task)
 
         assert result.status == TaskStatus.COMPLETED
-        assert fake_maeos.submitted == ["maeos-0001", "maeos-0002"]
+        assert fake_maeos.submitted == ["exec-0001", "exec-0002"]
 
     async def test_step_failure_marks_task_failed(self, db_session, executor):
         """Failed step → step marked FAILED, task marked FAILED."""
-        fake_maeos = FakeMAEOS(fail_ids={"maeos-0001"})
-        executor.set_maeos(fake_maeos)
+        fake_maeos = FakeRuntime(fail_ids={"exec-0001"})
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -472,7 +468,7 @@ class TestTaskExecutor:
 
     async def test_get_task_progress(self, db_session, executor):
         """get_task_progress returns step counts and details."""
-        executor.set_maeos(FakeMAEOS())
+        executor.set_runtime(FakeRuntime())
         done = make_step(status=TaskStepStatus.COMPLETED)
         pending = make_step(order=2, status=TaskStepStatus.PENDING)
 
@@ -497,7 +493,7 @@ class TestFullExecutionFlow:
 
     async def test_full_flow_success(self, db_session):
         """Complete happy path with mocked MAEOS."""
-        fake_maeos = FakeMAEOS()
+        fake_maeos = FakeRuntime()
 
         # Set up mock state
         task = make_task(id="task-full", status=TaskStatus.PLANNING,
@@ -515,7 +511,7 @@ class TestFullExecutionFlow:
         task = make_task(status=TaskStatus.EXECUTING)
 
         # Execute via executor
-        executor = TaskExecutor(maeos_instance=fake_maeos)
+        executor = TaskExecutor(runtime=fake_maeos)
 
         call_count = 0
 
@@ -540,7 +536,9 @@ class TestFullExecutionFlow:
              patch.object(TaskStateManager, 'update_step',
                           AsyncMock(return_value=completed_step)), \
              patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=completed_task)):
+                          AsyncMock(return_value=completed_task)), \
+             patch.object(TaskPolicyService, 'evaluate_step',
+                          AsyncMock(return_value=PolicyResult())):
 
             result = await executor.execute_task(db_session, task)
 

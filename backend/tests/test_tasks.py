@@ -123,7 +123,7 @@ class TestTaskStateManagerTaskCRUD:
         )
         assert task.id is not None
         assert task.title == _unique_title
-        assert task.status == TaskStatus.CREATED
+        assert task.status == TaskStatus.PENDING
         assert task.channel_id == "ch_test"
         assert task.priority == 2
 
@@ -262,8 +262,8 @@ class TestTaskStatusTransitions:
     async def test_noop_transition(self, db_session, state_mgr, _unique_title):
         """Same-status transition is a no-op."""
         task = await state_mgr.create_task(db_session, title=_unique_title, created_by="test")
-        result = await state_mgr.transition_task_status(db_session, task, TaskStatus.CREATED)
-        assert result.status == TaskStatus.CREATED
+        result = await state_mgr.transition_task_status(db_session, task, TaskStatus.PENDING)
+        assert result.status == TaskStatus.PENDING
 
     async def test_terminal_states_reject_all(self, db_session, state_mgr, _unique_title):
         """Terminal states (COMPLETED, CANCELLED) reject any transition."""
@@ -444,7 +444,7 @@ class TestTaskManagerLifecycle:
             created_by="test",
         )
         assert task.id is not None
-        assert task.status == TaskStatus.CREATED
+        assert task.status == TaskStatus.PENDING
 
         loaded = await task_mgr.get_task(db_session, task.id)
         assert loaded is not None
@@ -478,19 +478,19 @@ class TestTaskManagerLifecycle:
     async def test_full_lifecycle_via_task_manager(self, db_session, task_mgr, _unique_title):
         """End-to-end lifecycle via TaskManager convenience methods."""
         task = await task_mgr.create_task(db_session, title=_unique_title, created_by="test")
-        assert task.status == TaskStatus.CREATED
+        assert task.status == TaskStatus.PENDING
 
         task = await task_mgr.start_planning(db_session, task.id)
         assert task.status == TaskStatus.PLANNING
 
         task = await task_mgr.start_execution(db_session, task.id)
-        assert task.status == TaskStatus.EXECUTING
+        assert task.status == TaskStatus.RUNNING
 
         task = await task_mgr.pause(db_session, task.id)
         assert task.status == TaskStatus.PAUSED
 
         task = await task_mgr.resume(db_session, task.id)
-        assert task.status == TaskStatus.EXECUTING
+        assert task.status == TaskStatus.RUNNING
 
         task = await task_mgr.complete(db_session, task.id)
         assert task.status == TaskStatus.COMPLETED

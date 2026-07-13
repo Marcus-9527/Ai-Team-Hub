@@ -121,7 +121,7 @@ class TaskApprovalService:
         task = await self.state.get_task(db, approval.task_id)
         if task and task.status == TaskStatus.PAUSED:
             task = await self.state.transition_task_status(
-                db, task, TaskStatus.EXECUTING
+                db, task, TaskStatus.RUNNING
             )
 
         await db.flush()

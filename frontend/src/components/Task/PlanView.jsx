@@ -15,8 +15,10 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import { subscribeTaskEvents } from '../../services/taskEventBus';
+import { useTranslation } from '../../i18n';
 
 export default function PlanView({ taskId }) {
+  const t = useTranslation();
   const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -50,7 +52,7 @@ export default function PlanView({ taskId }) {
   }, [taskId]);
 
   const formatCost = (cost) => {
-    if (!cost || cost === '0' || cost === '0.00') return '未知';
+    if (!cost || cost === '0' || cost === '0.00') return t('task.plan.unknown');
     if (cost.startsWith('$')) return cost;
     return `$${parseFloat(cost).toFixed(4)}`;
   };
@@ -67,17 +69,19 @@ export default function PlanView({ taskId }) {
     return (
       <div className="text-center py-12">
         <FileText size={32} className="mx-auto mb-2 text-ink-faint opacity-40" />
-        <p className="text-sm text-ink-faint">{error || '暂无计划'}</p>
-        <p className="text-xs text-ink-faint mt-1">执行规划后这里会显示计划详情</p>
+        <p className="text-sm text-ink-faint">{error || t('task.plan.empty')}</p>
+        <p className="text-xs text-ink-faint mt-1">{t('task.plan.empty_hint')}</p>
       </div>
     );
   }
+
+  const riskLabel = plan.risk_level === 'high' ? t('task.risk.high') : plan.risk_level === 'medium' ? t('task.risk.medium') : t('task.risk.low');
 
   return (
     <div className="space-y-4">
       {/* Plan Header */}
       <div className="bg-white rounded-xl border border-hairline p-5">
-        <h3 className="text-sm font-bold text-ink mb-2">{plan.title || '任务计划'}</h3>
+        <h3 className="text-sm font-bold text-ink mb-2">{plan.title || t('task.plan.fallback_title')}</h3>
         {plan.description && (
           <p className="text-sm text-ink-mute mb-3 leading-relaxed">{plan.description}</p>
         )}
@@ -85,25 +89,25 @@ export default function PlanView({ taskId }) {
         {/* Meta grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <div className="text-[10px] text-ink-faint">置信度</div>
+            <div className="text-[10px] text-ink-faint">{t('task.plan.confidence')}</div>
             <div className="text-xs font-semibold text-ink">{plan.confidence || '-'}</div>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <div className="text-[10px] text-ink-faint">风险等级</div>
+            <div className="text-[10px] text-ink-faint">{t('task.plan.risk')}</div>
             <div className={`text-xs font-semibold ${
               plan.risk_level === 'high' ? 'text-red-600' :
               plan.risk_level === 'medium' ? 'text-amber-600' :
               'text-green-600'
             }`}>
-              {plan.risk_level || '-'}
+              {riskLabel}
             </div>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <div className="text-[10px] text-ink-faint">预计成本</div>
+            <div className="text-[10px] text-ink-faint">{t('task.plan.estimated_cost')}</div>
             <div className="text-xs font-semibold text-ink">{formatCost(plan.estimated_cost)}</div>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <div className="text-[10px] text-ink-faint">步骤数</div>
+            <div className="text-[10px] text-ink-faint">{t('task.plan.steps_count')}</div>
             <div className="text-xs font-semibold text-ink">{plan.steps_count || plan.steps?.length || 0}</div>
           </div>
         </div>
@@ -112,7 +116,7 @@ export default function PlanView({ taskId }) {
           <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
             <div className="flex items-center gap-1.5 text-[11px] text-amber-700 font-semibold mb-1">
               <AlertTriangle size={12} />
-              <span>决策依据</span>
+              <span>{t('task.plan.rationale')}</span>
             </div>
             <p className="text-xs text-amber-800 leading-relaxed">{plan.rationale}</p>
           </div>
@@ -122,7 +126,7 @@ export default function PlanView({ taskId }) {
       {/* Plan Steps */}
       {plan.steps && plan.steps.length > 0 && (
         <div className="bg-white rounded-xl border border-hairline p-5">
-          <h4 className="text-xs font-bold text-ink mb-3">计划步骤 ({plan.steps.length})</h4>
+          <h4 className="text-xs font-bold text-ink mb-3">{t('task.plan.steps', plan.steps.length)}</h4>
           <div className="space-y-2">
             {plan.steps.map((step, idx) => (
               <motion.div
@@ -136,7 +140,7 @@ export default function PlanView({ taskId }) {
                   <span className="text-xs font-bold text-indigo-600">{idx + 1}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-ink">{step.objective || step.description || `步骤 ${idx + 1}`}</p>
+                  <p className="text-sm text-ink">{step.objective || step.description || t('task.step_label', idx + 1)}</p>
                   {step.teammate_id && (
                     <span className="flex items-center gap-1 text-[11px] text-ink-faint mt-1">
                       <User size={10} /> {step.teammate_id}
@@ -154,14 +158,14 @@ export default function PlanView({ taskId }) {
         <div className="bg-white rounded-xl border border-hairline p-4">
           <div className="flex items-center gap-2 text-xs text-ink-mute">
             <Clock size={13} />
-            <span>计划状态:</span>
+            <span>{t('task.plan.status_label')}</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
               plan.status === 'approved' ? 'bg-green-100 text-green-600' :
               plan.status === 'rejected' ? 'bg-red-100 text-red-600' :
               plan.status === 'reviewing' ? 'bg-amber-100 text-amber-600' :
               'bg-gray-100 text-gray-600'
             }`}>
-              {plan.status}
+              {t('task.plan.status.' + (plan.status || 'pending'))}
             </span>
           </div>
         </div>

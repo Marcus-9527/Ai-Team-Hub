@@ -13,14 +13,16 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import { subscribeTaskEvents } from '../../services/taskEventBus';
+import { useTranslation } from '../../i18n';
 
 const APPROVAL_STATUS = {
-  PENDING:   { label: '待审批', color: 'text-amber-600', bg: 'bg-amber-100' },
-  APPROVED:  { label: '已批准', color: 'text-green-600', bg: 'bg-green-100' },
-  REJECTED:  { label: '已拒绝', color: 'text-red-600',   bg: 'bg-red-100' },
+  PENDING:   { label: 'task.approval.pending', color: 'text-amber-600', bg: 'bg-amber-100' },
+  APPROVED:  { label: 'task.approval.approve', color: 'text-green-600', bg: 'bg-green-100' },
+  REJECTED:  { label: 'task.approval.reject', color: 'text-red-600',   bg: 'bg-red-100' },
 };
 
 export default function ApprovalPanel({ taskId }) {
+  const t = useTranslation();
   const [approvals, setApprovals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
@@ -57,24 +59,24 @@ export default function ApprovalPanel({ taskId }) {
   const handleApprove = useCallback(async (approvalId) => {
     setActionLoading(approvalId);
     try {
-      await taskApi.approveApproval(approvalId, { reason: '已审批' });
+      await taskApi.approveApproval(approvalId, { reason: t('task.approve_reason') });
       await load();
     } catch (e) {
-      alert('审批失败: ' + e.message);
+      alert(t('task.approve_failed') + e.message);
     } finally {
       setActionLoading(null);
     }
   }, [load]);
 
   const handleReject = useCallback(async (approvalId) => {
-    const reason = prompt('请输入拒绝原因:');
+    const reason = prompt(t('task.reject_reason_ph'));
     if (reason === null) return; // cancelled
     setActionLoading(approvalId);
     try {
-      await taskApi.rejectApproval(approvalId, { reason: reason || '已拒绝' });
+      await taskApi.rejectApproval(approvalId, { reason: reason || t('task.reject_default') });
       await load();
     } catch (e) {
-      alert('拒绝失败: ' + e.message);
+      alert(t('task.reject_failed') + e.message);
     } finally {
       setActionLoading(null);
     }
@@ -92,8 +94,8 @@ export default function ApprovalPanel({ taskId }) {
     return (
       <div className="text-center py-12">
         <CheckCircle2 size={32} className="mx-auto mb-2 text-ink-faint opacity-40" />
-        <p className="text-sm text-ink-faint">暂无审批请求</p>
-        <p className="text-xs text-ink-faint mt-1">需要审批的步骤会显示在这里</p>
+        <p className="text-sm text-ink-faint">{t('task.approval.empty')}</p>
+        <p className="text-xs text-ink-faint mt-1">{t('task.approval.empty_hint')}</p>
       </div>
     );
   }
@@ -125,10 +127,10 @@ export default function ApprovalPanel({ taskId }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${asc.bg} ${asc.color}`}>
-                    {asc.label}
+                    {t(asc.label)}
                   </span>
                   {ap.step_id && (
-                    <span className="text-[11px] text-ink-faint">步骤: {ap.step_id.slice(0, 8)}</span>
+                    <span className="text-[11px] text-ink-faint">{t('task.step_label', ap.step_id.slice(0, 8))}</span>
                   )}
                 </div>
 
@@ -141,10 +143,10 @@ export default function ApprovalPanel({ taskId }) {
 
                 <div className="flex items-center gap-3 mt-2 text-[10px] text-ink-faint">
                   {ap.requested_at && (
-                    <span>请求: {new Date(ap.requested_at).toLocaleString('zh-CN')}</span>
+                    <span>{t('task.approval.request_at')}: {new Date(ap.requested_at).toLocaleString('zh-CN')}</span>
                   )}
                   {ap.approved_at && (
-                    <span>处理: {new Date(ap.approved_at).toLocaleString('zh-CN')}</span>
+                    <span>{t('task.approval.handled_at')}: {new Date(ap.approved_at).toLocaleString('zh-CN')}</span>
                   )}
                   {ap.approved_by && (
                     <span className="flex items-center gap-1">
@@ -166,7 +168,7 @@ export default function ApprovalPanel({ taskId }) {
                       ) : (
                         <ThumbsUp size={12} />
                       )}
-                      批准
+                      {t('task.approval.approve')}
                     </button>
                     <button
                       onClick={() => handleReject(ap.id)}
@@ -174,7 +176,7 @@ export default function ApprovalPanel({ taskId }) {
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 disabled:opacity-50 transition-all"
                     >
                       <ThumbsDown size={12} />
-                      拒绝
+                      {t('task.approval.reject')}
                     </button>
                   </div>
                 )}

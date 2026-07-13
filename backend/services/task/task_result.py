@@ -12,6 +12,7 @@ v2.5 Hardening additions:
 
 import logging
 import time
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -44,6 +45,37 @@ def estimate_tokens(text: str) -> int:
     if not text:
         return 0
     return max(1, len(text) // 4)
+
+
+def parse_task_output(result_text: str) -> dict:
+    """
+    Parse a RuntimeTask result into the structured TaskOutput shape:
+        {"summary", "files_changed", "commands_run", "git_commit", "test_result"}
+
+    If the result is JSON (engineer workflow), use it directly; otherwise wrap
+    the plain text as a summary. Never raises — falls back to a summary.
+    """
+    if not result_text:
+        return {
+            "summary": "", "files_changed": [], "commands_run": [],
+            "git_commit": "", "test_result": "",
+        }
+    try:
+        data = json.loads(result_text)
+        if isinstance(data, dict) and "summary" in data:
+            return {
+                "summary": data.get("summary", ""),
+                "files_changed": data.get("files_changed", []) or [],
+                "commands_run": data.get("commands_run", []) or [],
+                "git_commit": data.get("git_commit", "") or "",
+                "test_result": data.get("test_result", "") or "",
+            }
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "summary": result_text, "files_changed": [], "commands_run": [],
+        "git_commit": "", "test_result": "",
+    }
 
 
 def estimate_cost(
@@ -261,10 +293,10 @@ class TaskResultHandler:
         task: TaskModel,
     ) -> TaskModel:
         """Mark task as FAILED when a step fails (non-recoverable)."""
-        # Task must go through EXECUTING first
-        if task.status != TaskStatus.EXECUTING:
+        # Task must go through RUNNING first
+        if task.status != TaskStatus.RUNNING:
             task = await self.state.transition_task_status(
-                db, task, TaskStatus.EXECUTING
+                db, task, TaskStatus.RUNNING
             )
         return await self.state.transition_task_status(
             db, task, TaskStatus.FAILED

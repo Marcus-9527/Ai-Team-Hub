@@ -484,35 +484,51 @@ class TestParserConfidence:
 # Helper: Mock MAEOS for driver tests
 # ═══════════════════════════════════════════════════════════════
 
-class FakeMAEOSTask:
-    """Mock MAEOS task result."""
-    def __init__(self, task_id: str = "maeos-001", status: str = "COMPLETED",
+# Mock ExecutionRuntime: submit returns a task id, wait returns a RuntimeTask.
+class FakeRuntimeTask:
+    def __init__(self, task_id: str = "exec-0001", status: str = "COMPLETED",
                  result: str = "", error: str = ""):
         self.id = task_id
-        self.task_id = task_id
         self.status = status
         self.result = result
         self.error = error
 
 
-class FakeMAEOS:
-    """Mock MAEOS for planner driver testing."""
-    def __init__(self, result_text: str = "", fail: bool = False):
+class FakeRuntime:
+    """Mock ExecutionRuntime used in place of MAEOS."""
+
+    def __init__(self, result_text: str = "", fail: bool = False,
+                 fail_ids: set = None, fail_count: int = 0,
+                 fail_then_succeed: bool = False):
         self.result_text = result_text
         self.fail = fail
-        self._started = True
-        self.submitted_tasks: list[str] = []
+        self.fail_ids = fail_ids or set()
+        self.fail_count = fail_count
+        self.fail_then_succeed = fail_then_succeed
+        self._call_count = 0
+        self.submitted: list[str] = []
 
-    async def submit(self, description: str, priority: int = 2,
-                     intent: str = "", wait: bool = False, **kwargs) -> str:
-        task_id = f"maeos-{len(self.submitted_tasks) + 1:04d}"
-        self.submitted_tasks.append(task_id)
+    async def submit(self, description: str = "", priority: int = 2,
+                     intent: str = "", teammate: str = "",
+                     workspace_id: str = "", wait: bool = False,
+                     **kwargs) -> str:
+        self._call_count += 1
+        task_id = f"exec-{self._call_count:04d}"
+        self.submitted.append(task_id)
         return task_id
 
     async def wait(self, task_id: str, timeout: float = 300.0):
+        n = self._call_count
         if self.fail:
-            return FakeMAEOSTask(task_id, status="FAILED", error="Simulated failure")
-        return FakeMAEOSTask(task_id, status="COMPLETED", result=self.result_text)
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated failure")
+        if task_id in self.fail_ids:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated MAEOS failure")
+        if self.fail_then_succeed and n == 1:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        if self.fail_count > 0 and n <= self.fail_count:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        return FakeRuntimeTask(task_id, status="COMPLETED",
+                               result=self.result_text or f"Result for {task_id}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -525,7 +541,7 @@ class TestDriverGeneratePlan:
     @pytest.mark.asyncio
     async def test_success(self):
         """Successful plan generation returns parsed TaskPlan."""
-        maeos = FakeMAEOS(result_text=_valid_plan_json(task_id="task-001"))
+        maeos = FakeRuntime(result_text=_valid_plan_json(task_id="task-001"))
         plan = await generate_plan(maeos, goal="Build auth system", task_id="task-001")
         assert isinstance(plan, TaskPlan)
         assert plan.task_id == "task-001"
@@ -535,28 +551,28 @@ class TestDriverGeneratePlan:
     @pytest.mark.asyncio
     async def test_retry_on_parse_failure(self):
         """Retries on invalid JSON, eventually succeeds."""
-        maeos = FakeMAEOS(result_text=_valid_plan_json())
+        maeos = FakeRuntime(result_text=_valid_plan_json())
         plan = await generate_plan(maeos, goal="Build auth")
         assert isinstance(plan, TaskPlan)
 
     @pytest.mark.asyncio
     async def test_failure_after_all_retries(self):
         """Raises PlanningError after exhausting retries."""
-        maeos = FakeMAEOS(result_text="not valid json at all")
+        maeos = FakeRuntime(result_text="not valid json at all")
         with pytest.raises(PlanningError, match="failed after"):
             await generate_plan(maeos, goal="Build auth")
 
     @pytest.mark.asyncio
     async def test_maeos_task_failure(self):
         """Raises PlanningError when MAEOS task fails."""
-        maeos = FakeMAEOS(fail=True)
+        maeos = FakeRuntime(fail=True)
         with pytest.raises(PlanningError, match="failed"):
             await generate_plan(maeos, goal="Build auth")
 
     @pytest.mark.asyncio
     async def test_with_context(self):
         """Context gets included in the prompt."""
-        maeos = FakeMAEOS(result_text=_valid_plan_json())
+        maeos = FakeRuntime(result_text=_valid_plan_json())
         plan = await generate_plan(
             maeos,
             goal="Build auth",
@@ -567,7 +583,7 @@ class TestDriverGeneratePlan:
     @pytest.mark.asyncio
     async def test_task_id_override(self):
         """task_id from parameter overrides parsed one."""
-        maeos = FakeMAEOS(result_text=_valid_plan_json(task_id="parsed-id"))
+        maeos = FakeRuntime(result_text=_valid_plan_json(task_id="parsed-id"))
         plan = await generate_plan(maeos, goal="Build auth", task_id="actual-id")
         assert plan.task_id == "actual-id"
 

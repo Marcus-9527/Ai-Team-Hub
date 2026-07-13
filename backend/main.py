@@ -7,14 +7,19 @@ v2.1: Productization Layer — Public API + Auth + Observability
 """
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy import select
+
+from backend.routes.brain import router as brain_router
+from backend.routes.autonomous import router as autonomous_router
 
 
-# ── Security: never log API keys ──
 class APIKeyFilter(logging.Filter):
     """Filter out any log message containing potential API key patterns."""
 
@@ -63,11 +68,21 @@ from backend.services.tool_gateway import init_tool_gateway
 from backend.routes.v1_observability import router as v1_observability_router
 from backend.routes.semantic_cache import router as semantic_cache_router
 from backend.routes.traces import router as traces_router
-from backend.routes.workspace import router as workspace_router
+from backend.routes.executions import router as executions_router
+from backend.routes.artifacts import router as artifacts_router
+from backend.routes.dags import router as dags_router
+from backend.routes.approvals import router as approvals_router
+from backend.routes.dashboard import router as dashboard_router
+from backend.routes.policy import router as policy_router
+from backend.routes.brain import router as brain_router
+from backend.routes.automation import router as automation_router, automation_poll_loop
+from backend.routes.demo import router as demo_router
+from backend.routes.teams import router as teams_router
 
 logger = logging.getLogger("main")
 
 _sync_task: asyncio.Task | None = None
+_automation_task: asyncio.Task | None = None
 
 
 async def _periodic_model_sync(interval: int = CACHE_TTL):
@@ -116,6 +131,16 @@ async def lifespan(app: FastAPI):
     registry.register(MemoryTaskHook())
     logger.info("MemoryTaskHook registered — task lifecycle → memory pipeline active")
 
+    # ── Phase 12: Brain Task Hook (reflection) ──
+    from backend.services.brain.task_hook import BrainTaskHook
+    registry.register(BrainTaskHook())
+    logger.info("BrainTaskHook registered — task lifecycle → brain reflection active")
+
+    # ── Phase 20: Channel Notify Hook (auto-publish results to channel) ──
+    from backend.services.brain.channel_notify_hook import ChannelNotifyHook
+    registry.register(ChannelNotifyHook())
+    logger.info("ChannelNotifyHook registered — task results → channel messages")
+
     # ── Model auto-sync ──
     # Always sync on startup when online (non-blocking)
     try:
@@ -128,6 +153,10 @@ async def lifespan(app: FastAPI):
     _sync_task = asyncio.create_task(_periodic_model_sync())
     logger.info("Periodic model sync scheduled every %ds", CACHE_TTL)
 
+    # ── Phase 7: Automation poll loop ──
+    _automation_task = asyncio.create_task(automation_poll_loop(interval=30))
+    logger.info("Automation poll loop started (30s interval)")
+
     yield
 
     # Shutdown
@@ -135,6 +164,12 @@ async def lifespan(app: FastAPI):
         _sync_task.cancel()
         try:
             await _sync_task
+        except asyncio.CancelledError:
+            pass
+    if _automation_task:
+        _automation_task.cancel()
+        try:
+            await _automation_task
         except asyncio.CancelledError:
             pass
     from backend.routes.maeos import _maeos
@@ -172,6 +207,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# P3 #6 (short-term mitigation): lock down script sources so a same-origin XSS
+# can't pull an external script to exfiltrate the API key from localStorage.
+# Inline scripts are still allowed because the SPA/legacy routes rely on them.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: https:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("Content-Security-Policy", _CSP)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    return resp
+
 # Auth middleware (protects /v1/* routes)
 app.add_middleware(AuthMiddleware, api_key_callback=validate_api_key)
 
@@ -203,7 +259,21 @@ app.include_router(team_files_router)
 app.include_router(v1_observability_router)   # /v1/timeline, /v1/cost, /v1/cache/vis, /v1/team/interactions, /v1/system/summary
 app.include_router(semantic_cache_router)     # /api/semantic-cache/*
 app.include_router(traces_router)             # /api/traces/*
-app.include_router(workspace_router)          # /api/workspaces/*
+app.include_router(executions_router)         # /api/executions/*
+app.include_router(artifacts_router)          # /api/artifacts/*
+from backend.routes.evaluations import router as evaluations_router
+app.include_router(evaluations_router)        # /api/evaluations/*
+app.include_router(dags_router)               # /api/dags/*
+app.include_router(approvals_router)           # /api/approvals/*
+app.include_router(dashboard_router)            # /api/dashboard
+app.include_router(policy_router)               # /api/policy
+app.include_router(brain_router)
+
+# Phase 13 — Autonomous Collaboration
+app.include_router(autonomous_router)                 # /api/brain
+app.include_router(automation_router)             # /api/automation
+app.include_router(demo_router)
+app.include_router(teams_router)                    # /api/demo
 
 
 @app.get("/api/health")
@@ -243,6 +313,16 @@ async def cache_stats():
 import os
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.exists(frontend_dist):
+    # SPA 入口 HTML 不缓存（否则 CF 边缘会把旧构建的 index.html 钉住）；
+    # /assets/* 带内容 hash，可安全长缓存。
+    @app.middleware("http")
+    async def _no_cache_html(request: Request, call_next):
+        resp = await call_next(request)
+        ct = resp.headers.get("content-type", "")
+        if ct.startswith("text/html"):
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
+
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
 if __name__ == "__main__":

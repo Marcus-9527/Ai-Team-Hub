@@ -152,31 +152,32 @@ const FREE_MODELS = new Set([
 ]);
 
 // ── Provider 元数据 ──
+// desc: 面向普通用户的中文简介（不需要理解 API / Provider 概念）
 const PROVIDER_META = [
   // 中国
-  { id: 'deepseek',    name: 'DeepSeek (深度求索)',    region: 'cn' },
-  { id: 'zhipu',       name: '智谱AI (GLM系列)',       region: 'cn' },
-  { id: 'moonshot',    name: '月之暗面 (Kimi)',        region: 'cn' },
-  { id: 'baidu',       name: '百度千帆 (文心一言)',    region: 'cn' },
-  { id: 'alibaba',     name: '阿里通义 (Qwen)',        region: 'cn' },
-  { id: 'doubao',      name: '字节豆包 (Doubao)',      region: 'cn' },
-  { id: 'hunyuan',     name: '腾讯混元',               region: 'cn' },
-  { id: 'baichuan',    name: '百川智能',               region: 'cn' },
-  { id: 'yi',          name: '零一万物 (Yi)',          region: 'cn' },
-  { id: 'minimax',     name: 'MiniMax',                region: 'cn' },
-  { id: 'stepfun',     name: '阶跃星辰 (Step)',        region: 'cn' },
-  { id: 'spark',       name: '科大讯飞 (星火)',        region: 'cn' },
-  { id: 'siliconflow', name: '硅基流动',               region: 'cn' },
+  { id: 'deepseek',    name: 'DeepSeek (深度求索)',  region: 'cn', desc: '国内最强推理模型，性价比高，适合复杂任务' },
+  { id: 'zhipu',       name: '智谱AI (GLM系列)',     region: 'cn', desc: '清华系大模型，中文理解强，长文本友好' },
+  { id: 'moonshot',    name: '月之暗面 (Kimi)',      region: 'cn', desc: '超长上下文，适合读长文档、做总结' },
+  { id: 'baidu',       name: '百度千帆 (文心一言)',  region: 'cn', desc: '百度出品，中文场景覆盖广' },
+  { id: 'alibaba',     name: '阿里通义 (Qwen)',      region: 'cn', desc: '通义千问，编码与多语言能力强' },
+  { id: 'doubao',      name: '字节豆包 (Doubao)',     region: 'cn', desc: '字节出品，响应快、成本低' },
+  { id: 'hunyuan',     name: '腾讯混元',             region: 'cn', desc: '腾讯大模型，生态集成好' },
+  { id: 'baichuan',    name: '百川智能',             region: 'cn', desc: '国产开源模型，部署灵活' },
+  { id: 'yi',          name: '零一万物 (Yi)',        region: 'cn', desc: '李开复团队，中英文均衡' },
+  { id: 'minimax',     name: 'MiniMax',              region: 'cn', desc: '对话与语音场景表现好' },
+  { id: 'stepfun',     name: '阶跃星辰 (Step)',      region: 'cn', desc: '多模态与长文本推理' },
+  { id: 'spark',       name: '科大讯飞 (星火)',      region: 'cn', desc: '讯飞语音生态，中文识别强' },
+  { id: 'siliconflow', name: '硅基流动',             region: 'cn', desc: '聚合多家开源模型，注册即送额度' },
   // 海外
-  { id: 'openai',      name: 'OpenAI',                 region: 'overseas' },
-  { id: 'anthropic',   name: 'Anthropic (Claude)',     region: 'overseas' },
-  { id: 'google',      name: 'Google Gemini',          region: 'overseas' },
-  { id: 'mistral',     name: 'Mistral AI',             region: 'overseas' },
-  { id: 'groq',        name: 'Groq',                   region: 'overseas' },
-  { id: 'together',    name: 'Together AI',            region: 'overseas' },
-  { id: 'openrouter',  name: 'OpenRouter',             region: 'overseas' },
-  { id: 'opencode',    name: 'OpenCode Zen',           region: 'overseas' },
-  { id: 'custom',      name: '自定义 (Custom)',        region: 'overseas' },
+  { id: 'openai',      name: 'OpenAI',               region: 'overseas', desc: 'GPT 系列，通用能力业界标杆' },
+  { id: 'anthropic',   name: 'Anthropic (Claude)',   region: 'overseas', desc: 'Claude 系列，长文与代码强' },
+  { id: 'google',      name: 'Google Gemini',        region: 'overseas', desc: '多模态与超长上下文' },
+  { id: 'mistral',     name: 'Mistral AI',           region: 'overseas', desc: '欧洲开源模型，轻量高效' },
+  { id: 'groq',        name: 'Groq',                 region: 'overseas', desc: '极速推理，延迟极低' },
+  { id: 'together',    name: 'Together AI',          region: 'overseas', desc: '聚合开源模型，训练推理一体' },
+  { id: 'openrouter',  name: 'OpenRouter',           region: 'overseas', desc: '一个接口接入上百种模型' },
+  { id: 'opencode',    name: 'OpenCode Zen',         region: 'overseas', desc: '统一网关，路由多家顶尖模型' },
+  { id: 'custom',      name: '自定义 (Custom)',      region: 'overseas', desc: '任意 OpenAI 兼容模型' },
 ];
 
 // ── 动态模型缓存 ──

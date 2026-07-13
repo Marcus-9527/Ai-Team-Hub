@@ -2,37 +2,46 @@ import { useState, useCallback, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { LangProvider } from './i18n';
 import Sidebar from './components/Sidebar/Sidebar';
-import ChannelView from './components/Channel/ChannelView';
-import WelcomeView from './components/Channel/WelcomeView';
-import CreateChannelView from './components/Channel/CreateChannelView';
-import CreateTeammateView from './components/Teammate/CreateTeammateView';
+import ChatLayout from './components/ChatLayout';
+import NewTopicPage from './components/NewTopic/NewTopicPage';
+import TaskModeView from './components/TaskModeView';
 import SettingsPanel from './components/Settings/SettingsPanel';
-import TaskListView from './components/Task/TaskListView';
+import HomePage from './components/Home/HomePage';
+import ProjectsPage from './components/Projects/ProjectsPage';
+import TeamPage from './components/Team/TeamPage';
+import DashboardPage from './components/Dashboard/DashboardPage';
+import InboxPage from './components/Inbox/InboxPage';
+import DeveloperCenter from './components/Developer/DeveloperCenter';
+import BrainPage from './components/Brain/BrainPage';
+import ProposalApprovalPage from './components/Brain/ProposalApprovalPage';
+import ApprovalQueuePage from './components/Approval/ApprovalQueuePage';
+import AutonomousCenter from './components/Autonomous/AutonomousCenter';
+import ExecutionRoom from './components/Execution/ExecutionRoom';
+import WorkspaceExplorer from './components/Workspace/WorkspaceExplorer';
 
 import LandingPage from './components/Landing/LandingPage';
 import PitchDeck from './components/Landing/PitchDeck';
 import './styles/landing.css';
 import * as api from './services/api';
 
-import { TaskProvider } from './services/taskContext';
-
 export default function App() {
-  // URL-based routing: #/landing, #/app, or #/pitch
   const [route, setRoute] = useState(() => {
     const hash = window.location.hash.replace('#', '');
     if (hash === 'pitch') return 'pitch';
     return hash.startsWith('/app') ? 'app' : 'landing';
   });
 
-  const [activeChannelId, setActiveChannelId] = useState(null);
+  const [view, setView] = useState('home');
+  const [userMode, setUserMode] = useState(() => localStorage.getItem('aihub_user_mode') || 'user');
+  const setUserModePersist = useCallback((m) => {
+    setUserMode(m);
+    localStorage.setItem('aihub_user_mode', m);
+  }, []);
+  const [channelId, setChannelId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showCreateChannel, setShowCreateChannel] = useState(false);
-  const [showCreateTeammate, setShowCreateTeammate] = useState(false);
-  const [showTasks, setShowTasks] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [lang, setLang] = useState(() => localStorage.getItem('aihub_lang') || 'zh');
 
-  // Listen for hash changes
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash.replace('#', '');
@@ -48,42 +57,28 @@ export default function App() {
     localStorage.setItem('aihub_lang', newLang);
   }, []);
 
-  const handleEnterApp = useCallback(async () => {
-    // 首次进入 app 时，如果没有频道则自动创建默认频道和队友
+  const triggerRefresh = useCallback(() => setRefreshKey(k => k + 1), []);
+
+  const handleEnterApp = useCallback(async (targetView) => {
+    window.location.hash = '#/app';
     try {
-      const [ch, tm] = await Promise.all([api.listChannels(), api.listTeammates()]);
+      const ch = await api.listChannels();
       if (ch.length === 0) {
-        // 先检查是否有 API Key
         const keys = await api.listAPIKeys();
-        let keyId;
-        if (keys.length === 0) {
-          // Prompt user for API key — auto-provisioning requires a valid key
-          alert('请先在设置中添加 API Key，然后才能创建队友。');
-          // Continue to app — user can configure keys in Settings
-        } else {
-          keyId = keys[0].id;
-        }
-        // 创建默认队友（如果没有）— requires API key
+        let keyId = keys.length > 0 ? keys[0].id : null;
+        const tm = await api.listTeammates();
         let engineerId, pmId;
         if (tm.length === 0 && keyId) {
           const [engineer, pm] = await Promise.all([
             api.createTeammate({
-              name: 'Senior Engineer',
-              role: 'engineer',
-              avatar_emoji: '👨‍💻',
-              system_prompt: 'You are a Senior Engineer. Write clean, efficient code. Review for bugs and suggest improvements. Be precise and technical.',
-              model_provider: 'openrouter',
-              model_name: 'openrouter/auto',
-              api_key_ref: keyId,
+              name: '高级工程师', role: 'engineer', avatar_emoji: '👨‍💻',
+              system_prompt: 'You are a Senior Engineer. Write clean, efficient code.',
+              model_provider: 'openrouter', model_name: 'openrouter/auto', api_key_ref: keyId,
             }),
             api.createTeammate({
-              name: 'Product Manager',
-              role: 'pm',
-              avatar_emoji: '🧠',
-              system_prompt: 'You are a Product Manager. Focus on user needs, prioritize features, and ensure the team delivers value. Think strategically about product decisions.',
-              model_provider: 'openrouter',
-              model_name: 'openrouter/auto',
-              api_key_ref: keyId,
+              name: '产品经理', role: 'pm', avatar_emoji: '🧠',
+              system_prompt: 'You are a Product Manager. Focus on user needs and strategic decisions.',
+              model_provider: 'openrouter', model_name: 'openrouter/auto', api_key_ref: keyId,
             }),
           ]);
           engineerId = engineer.id;
@@ -92,78 +87,53 @@ export default function App() {
           engineerId = tm[0].id;
           pmId = tm.length > 1 ? tm[1].id : null;
         }
-        // 创建默认频道
-        const newCh = await api.createChannel({ name: 'General', description: 'Default channel' });
-        // 把队友加入频道
+        const newCh = await api.createChannel({ name: 'General', description: 'Main chat channel' });
         if (engineerId) await api.addTeammateToChannel(newCh.id, engineerId);
         if (pmId) await api.addTeammateToChannel(newCh.id, pmId);
-        setActiveChannelId(newCh.id);
-      } else if (ch.length > 0 && !activeChannelId) {
-        // 有频道但没有选中，默认选中第一个
-        setActiveChannelId(ch[0].id);
+        setChannelId(newCh.id);
+      } else {
+        setChannelId(ch[0].id);
       }
     } catch (e) {
-      console.error('Init app failed:', e);
+      console.error('Init failed:', e);
     }
     setRoute('app');
-  }, [activeChannelId]);
+    window.location.hash = '#/app';
+  }, []);
 
   const handleGoToLanding = useCallback(() => {
     window.location.hash = '#/landing';
     setRoute('landing');
-    setActiveChannelId(null);
     setShowSettings(false);
-    setShowCreateTeammate(false);
-    setShowCreateChannel(false);
+    setChannelId(null);
   }, []);
 
-  const triggerRefresh = useCallback(() => setRefreshKey(k => k + 1), []);
-  const clearViews = useCallback(() => {
+  const handleNavigate = useCallback((newView) => {
+    if (route !== 'app') { handleEnterApp(); return; }
     setShowSettings(false);
-    setShowCreateTeammate(false);
-    setShowCreateChannel(false);
-    setShowTasks(false);
-  }, []);
-
-  const goHome = useCallback(() => { clearViews(); setActiveChannelId(null); }, [clearViews]);
-
-  const handleSelectChannel = useCallback((id) => {
-    if (id === null) { goHome(); return; }
-    clearViews();
-    setActiveChannelId(id);
-  }, [clearViews, goHome]);
+    if (newView === 'chat') {
+      if (!channelId) {
+        api.listChannels().then(chs => {
+          if (chs.length > 0) setChannelId(chs[0].id);
+        }).catch(() => {});
+      }
+    }
+    if (newView === 'new-topic') {
+      setChannelId(null);
+    }
+    setView(newView);
+  }, [route, handleEnterApp, channelId]);
 
   const handleOpenSettings = useCallback(() => {
     setShowSettings(s => !s);
-    setShowCreateTeammate(false);
-    setShowCreateChannel(false);
-    setActiveChannelId(null);
   }, []);
 
-  const handleCreateChannel = useCallback(() => { clearViews(); setShowCreateChannel(true); }, [clearViews]);
-  const handleChannelDone = useCallback((channel) => {
-    setShowCreateChannel(false);
-    setActiveChannelId(channel.id);
-    triggerRefresh();
-  }, [triggerRefresh]);
-
-  const handleCreateTeammate = useCallback(() => { clearViews(); setShowCreateTeammate(true); }, [clearViews]);
-  const handleTeammateDone = useCallback(() => {
-    setShowCreateTeammate(false);
-    triggerRefresh();
-  }, [triggerRefresh]);
-
-  const handleOpenTasks = useCallback(() => {
-    clearViews();
-    setShowTasks(s => !s);
-    setActiveChannelId(null);
-  }, [clearViews]);
-
-  const handleCloseTasks = useCallback(() => {
-    setShowTasks(false);
+  const handleChannelSelect = useCallback((id) => {
+    setChannelId(id);
+    setView('chat');
   }, []);
 
-  // ── Landing Page ──
+  // ── Landing ──
   if (route === 'landing') {
     return (
       <LangProvider lang={lang}>
@@ -183,7 +153,6 @@ export default function App() {
     );
   }
 
-  // ── Pitch Deck ──
   if (route === 'pitch') {
     return (
       <LangProvider lang={lang}>
@@ -192,49 +161,81 @@ export default function App() {
     );
   }
 
-  // ── Product App ──
-  let viewKey, ViewComponent, viewProps;
-  if (showCreateTeammate) {
-    viewKey = 'create-teammate';
-    ViewComponent = CreateTeammateView;
-    viewProps = { onDone: handleTeammateDone, onCancel: goHome };
-  } else if (showCreateChannel) {
-    viewKey = 'create-channel';
-    ViewComponent = CreateChannelView;
-    viewProps = { onDone: handleChannelDone, onCancel: goHome };
-  } else if (showTasks) {
-    viewKey = 'tasks';
-    ViewComponent = TaskListView;
-    viewProps = { onBack: handleCloseTasks };
-  } else if (showSettings) {
+  // ── App: multi-view ──
+  let ViewComponent, viewKey, viewProps;
+  if (showSettings) {
     viewKey = 'settings';
     ViewComponent = SettingsPanel;
-    viewProps = { onClose: goHome, triggerRefresh, lang, changeLang };
-  } else if (activeChannelId) {
-    viewKey = activeChannelId;
-    ViewComponent = ChannelView;
-    viewProps = { channelId: activeChannelId, triggerRefresh, refreshKey };
+    viewProps = { onClose: () => setShowSettings(false), triggerRefresh, lang, changeLang, userMode, setUserMode: setUserModePersist };
+  } else if (view === 'chat') {
+    viewKey = 'chat-' + (channelId || 'empty') + '-' + refreshKey;
+    ViewComponent = ChatLayout;
+    viewProps = { channelId, setChannelId, triggerRefresh, refreshKey, onNavigate: handleNavigate, onOpenSettings: handleOpenSettings };
+  } else if (view === 'new-topic') {
+    viewKey = 'new-topic-' + refreshKey;
+    ViewComponent = NewTopicPage;
+    viewProps = { setChannelId, triggerRefresh, refreshKey };
+  } else if (view === 'tasks') {
+    viewKey = 'tasks-' + refreshKey;
+    ViewComponent = TaskModeView;
+    viewProps = { userMode };
+  } else if (view === 'projects') {
+    viewKey = 'projects-' + refreshKey;
+    ViewComponent = ProjectsPage;
+    viewProps = { lang };
+  } else if (view === 'inbox') {
+    viewKey = 'inbox-' + refreshKey;
+    ViewComponent = InboxPage;
+    viewProps = { onNavigate: handleNavigate, setChannelId };
+  } else if (view === 'team') {
+    viewKey = 'team-' + refreshKey;
+    ViewComponent = TeamPage;
+    viewProps = { lang };
+  } else if (view === 'dashboard') {
+    viewKey = 'dashboard-' + refreshKey;
+    ViewComponent = userMode === 'developer' ? DeveloperCenter : DashboardPage;
+    viewProps = { onBack: () => setView('home') };
+  } else if (view === 'brain') {
+    viewKey = 'brain-' + refreshKey;
+    ViewComponent = BrainPage;
+    viewProps = { lang };
+  } else if (view === 'proposals') {
+    viewKey = 'proposals-' + refreshKey;
+    ViewComponent = ProposalApprovalPage;
+    viewProps = { lang };
+  } else if (view === 'approvals') {
+    viewKey = 'approvals-' + refreshKey;
+    ViewComponent = ApprovalQueuePage;
+    viewProps = { onBack: () => setView('home') };
+  } else if (view === 'autonomous') {
+    viewKey = 'autonomous-' + refreshKey;
+    ViewComponent = AutonomousCenter;
+    viewProps = {};
+  } else if (view === 'execution') {
+    viewKey = 'execution-' + refreshKey;
+    ViewComponent = ExecutionRoom;
+    viewProps = {};
+  } else if (view === 'workspace') {
+    viewKey = 'workspace-' + refreshKey;
+    ViewComponent = WorkspaceExplorer;
+    viewProps = {};
   } else {
-    viewKey = 'welcome';
-    ViewComponent = WelcomeView;
-    viewProps = { onCreateChannel: handleCreateChannel };
+    viewKey = 'home-' + refreshKey;
+    ViewComponent = HomePage;
+    viewProps = { onNavigate: handleNavigate, triggerRefresh, refreshKey, lang, userMode };
   }
 
   return (
     <LangProvider lang={lang}>
-      <TaskProvider>
-      <div className="flex h-screen overflow-hidden product-body">
+      <div className="flex h-screen overflow-hidden bg-[#faf8f5]">
         <Sidebar
-          activeChannelId={activeChannelId}
-          onSelectChannel={handleSelectChannel}
+          activeView={showSettings ? null : view}
+          onNavigate={handleNavigate}
           onOpenSettings={handleOpenSettings}
-          onCreateChannel={handleCreateChannel}
-          onCreateTeammate={handleCreateTeammate}
-          onOpenTasks={handleOpenTasks}
-          showTasks={showTasks}
-          refreshKey={refreshKey}
-          triggerRefresh={triggerRefresh}
           showSettings={showSettings}
+          channelId={channelId}
+          onChannelSelect={handleChannelSelect}
+          showDashboard={userMode === 'developer'}
         />
         <div className="flex-1 flex flex-col min-w-0 relative">
           <AnimatePresence mode="sync">
@@ -242,7 +243,6 @@ export default function App() {
           </AnimatePresence>
         </div>
       </div>
-      </TaskProvider>
     </LangProvider>
   );
 }

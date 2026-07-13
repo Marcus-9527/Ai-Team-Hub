@@ -37,6 +37,21 @@ from backend.cache import message_cache, teammate_cache, apikey_cache
 
 logger = logging.getLogger("messages")
 
+
+def _no_key_error(message: str) -> dict:
+    """Structured 400 body for the missing-API-key dead-end (P2 #5).
+
+    Carries a recovery hint the frontend turns into a clickable link to Settings,
+    so the user isn't stranded on a raw error string.
+    """
+    return {
+        "message": message,
+        "recovery": {
+            "action": "open_settings",
+            "label": "前往设置配置 API Key",
+        },
+    }
+
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "uploads")
@@ -390,6 +405,12 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         user_msg_id = user_msg.id
         message_cache.invalidate(channel_id)
 
+    # ── Inject memory context before team response ──
+    from backend.services.memory.memory_context import get_memory_context
+    mem_ctx = await get_memory_context().build_chat_context(channel_id, content)
+    if mem_ctx.text:
+        content = f"[Previous context]\n{mem_ctx.text}\n\n---\n\n{content}"
+
     # ── Team Collaboration: all teammates respond ──
     from backend.services.team_collaboration import generate_team_response
     from backend.models import Channel as ChannelModel
@@ -431,23 +452,31 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         teammate_cache.set(tm_id, tm)
         return tm
 
+    # Ponytail fallback: if a teammate was never bound to a key but the
+    # workspace has an active key, use it. Prevents the "configured a key but
+    # channel says none found" dead-end (P1 #1).
+    async def _fallback_key_ref() -> str | None:
+        kr = await db.execute(select(APIKey).where(APIKey.is_active == "1").limit(1))
+        k = kr.scalar_one_or_none()
+        return k.id if k else None
+
     all_teammates = []
     if teammate_ids:
         # Only the specified teammates
         for tm_id in teammate_ids:
             tm = await _load_teammate(tm_id)
-            if tm and tm.get("api_key_ref"):
+            if tm and (tm.get("api_key_ref") or await _fallback_key_ref()):
                 all_teammates.append(tm)
         if not all_teammates:
-            raise HTTPException(status_code=400, detail="No specified teammates found or have API keys")
+            raise HTTPException(status_code=400, detail=_no_key_error("No specified teammates found or have API keys"))
     else:
         # All channel teammates
         for tm_id in channel_data:
             tm = await _load_teammate(tm_id)
-            if tm and tm.get("api_key_ref"):
+            if tm and (tm.get("api_key_ref") or await _fallback_key_ref()):
                 all_teammates.append(tm)
         if not all_teammates:
-            raise HTTPException(status_code=400, detail="No teammates with API keys found in this channel")
+            raise HTTPException(status_code=400, detail=_no_key_error("No teammates with API keys found in this channel"))
 
     # ── Load message history (always from DB to avoid truncated cache) ──
     hist_result = await db.execute(
@@ -455,11 +484,48 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
     )
     all_messages = list(hist_result.scalars().all())
 
+    # ── Policy Gate: check each teammate's send permission ──
+    from backend.services.task.task_policy import check_message_policy
+    policy_allowed: list[dict] = []
+    for tm in all_teammates:
+        ok, _reason = await check_message_policy(db, tm, channel_id, action="message.send")
+        if ok:
+            policy_allowed.append(tm)
+        else:
+            logger.info("[Policy] blocked %s from channel %s: %s",
+                        tm.get("name", "?"), channel_id[:8], _reason)
+    all_teammates = policy_allowed
+    if not all_teammates:
+        raise HTTPException(status_code=400, detail="All teammates blocked by policy")
+
+    # ── Cede Protocol: let each teammate decide whether to respond ──
+    from backend.services.autonomous.cede_protocol import get_cede_protocol
+    cede = get_cede_protocol()
+    cede_msg_id = user_msg_id or str(uuid.uuid4())
+    ceded_teammates: list[dict] = []
+    active_teammates: list[dict] = []
+    for tm in all_teammates:
+        decision = await cede.decide(tm, content, channel_id=channel_id, message_id=cede_msg_id)
+        await cede.record_decision(tm, cede_msg_id, decision, channel_id=channel_id)
+        if decision.value == "respond":
+            active_teammates.append(tm)
+        else:
+            ceded_teammates.append(dict(tm))
+    all_teammates = active_teammates
+    if not all_teammates:
+        raise HTTPException(status_code=400, detail="All teammates ceded this message")
+
     # ── Stream team collaboration response ──
     collected_events: list[dict] = []  # structured events — no SSE re-parse needed
 
     async def generate():
         try:
+            # Emit cede notifications before streaming responses
+            for ctm in ceded_teammates:
+                yield "data: " + json.dumps({
+                    "type": "system_message",
+                    "payload": {"content": f"**{ctm.get('name', '?')}** chose not to respond ({ctm.get('role', '?')})"},
+                }) + "\n\n"
             async for chunk in generate_team_response(
                 teammates=all_teammates,
                 user_message=content,
@@ -580,6 +646,21 @@ async def _save_team_response_from_events(
             await sess.commit()
             message_cache.invalidate(channel_id)
             logger.info(f"Team response saved ({len(responses)} individual messages)")
+
+        # ── Phase 4: Store conversation memory ──
+        try:
+            response_summary = " | ".join(
+                f"{name_map.get(r['teammate_id'], '?')}: {r['content'][:100]}"
+                for r in responses.values()
+            )
+            from backend.services.memory.memory_context import get_memory_context
+            await get_memory_context().store_turn(
+                channel_id=channel_id,
+                user_message=str(content or "")[:500],
+                response_summary=response_summary[:500],
+            )
+        except Exception as mem_err:
+            logger.debug(f"[MEMORY] Chat memory write skipped: {mem_err}")
 
     except Exception as e:
         logger.error(f"Failed to save team response: {e}", exc_info=True)

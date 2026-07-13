@@ -45,6 +45,7 @@ class TaskLifecycleEvent(str, Enum):
     STEP_COMPLETED = "STEP_COMPLETED"
     EXECUTION_COMPLETED = "EXECUTION_COMPLETED"
     PLAN_APPROVED = "PLAN_APPROVED"
+    REVIEW_REJECTED = "REVIEW_REJECTED"
     # Future events can be added here without breaking existing hooks
 
 
@@ -128,6 +129,9 @@ class TaskHook(ABC):
     async def on_plan_approved(self, ctx: TaskHookContext) -> None:
         """Hook: a plan review was approved."""
 
+    async def on_review_rejected(self, ctx: TaskHookContext) -> None:
+        """Hook: a task review was rejected."""
+
     async def on_event(self, event: TaskLifecycleEvent, ctx: TaskHookContext) -> None:
         """
         Catch-all: called for every event, including those without a dedicated method.
@@ -146,6 +150,8 @@ class TaskHook(ABC):
             await self.on_execution_completed(ctx)
         elif event == TaskLifecycleEvent.PLAN_APPROVED:
             await self.on_plan_approved(ctx)
+        elif event == TaskLifecycleEvent.REVIEW_REJECTED:
+            await self.on_review_rejected(ctx)
 
 
 # ═══════════════════════════════════════════════════════════════

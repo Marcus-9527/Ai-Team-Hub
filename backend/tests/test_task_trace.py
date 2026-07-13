@@ -21,6 +21,7 @@ from backend.services.task.task_executor import TaskExecutor
 from backend.services.task.task_events import TaskEventLogger, TaskEvent
 from backend.services.task.task_result import TaskResultHandler
 from backend.services.task.task_state import TaskStateManager
+from backend.services.task.task_policy import TaskPolicyService, PolicyResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -61,24 +62,51 @@ def make_execution(**kwargs) -> TaskExecutionModel:
     return TaskExecutionModel(**defaults)
 
 
-class FakeMAEOS:
-    def __init__(self):
-        self._started = True
-
-    async def submit(self, **kwargs) -> str:
-        return "maeos-trace-001"
-
-    async def wait(self, task_id: str, timeout: float = 300.0):
-        return FakeMAEOSTask(task_id, status="COMPLETED", result="Trace result")
-
-
-class FakeMAEOSTask:
-    def __init__(self, task_id, status="COMPLETED", result="", error=""):
+# Mock ExecutionRuntime: submit returns a task id, wait returns a RuntimeTask.
+class FakeRuntimeTask:
+    def __init__(self, task_id: str = "exec-0001", status: str = "COMPLETED",
+                 result: str = "", error: str = ""):
         self.id = task_id
         self.status = status
         self.result = result
         self.error = error
-        self.trace_report = {"trace_id": "maeos-trace-report-001"}
+
+
+class FakeRuntime:
+    """Mock ExecutionRuntime used in place of MAEOS."""
+
+    def __init__(self, result_text: str = "", fail: bool = False,
+                 fail_ids: set = None, fail_count: int = 0,
+                 fail_then_succeed: bool = False):
+        self.result_text = result_text
+        self.fail = fail
+        self.fail_ids = fail_ids or set()
+        self.fail_count = fail_count
+        self.fail_then_succeed = fail_then_succeed
+        self._call_count = 0
+        self.submitted: list[str] = []
+
+    async def submit(self, description: str = "", priority: int = 2,
+                     intent: str = "", teammate: str = "",
+                     workspace_id: str = "", wait: bool = False,
+                     **kwargs) -> str:
+        self._call_count += 1
+        task_id = f"exec-{self._call_count:04d}"
+        self.submitted.append(task_id)
+        return task_id
+
+    async def wait(self, task_id: str, timeout: float = 300.0):
+        n = self._call_count
+        if self.fail:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated failure")
+        if task_id in self.fail_ids:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated MAEOS failure")
+        if self.fail_then_succeed and n == 1:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        if self.fail_count > 0 and n <= self.fail_count:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        return FakeRuntimeTask(task_id, status="COMPLETED",
+                               result=self.result_text or f"Result for {task_id}")
 
 
 # ── TaskEventLogger Unit Tests ──
@@ -326,8 +354,8 @@ class TestExecutorTraceIntegration:
 
     async def test_execute_generates_trace_id(self, db_session):
         """Executor generates a trace_id and passes it to execution records."""
-        maeos = FakeMAEOS()
-        executor = TaskExecutor(maeos_instance=maeos)
+        maeos = FakeRuntime()
+        executor = TaskExecutor(runtime=maeos)
         step = make_step()
         task = make_task()
         task.steps = [step]
@@ -350,7 +378,9 @@ class TestExecutorTraceIntegration:
              patch.object(TaskStateManager, 'update_step',
                           AsyncMock(return_value=completed_step)), \
              patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.COMPLETED))):
+                          AsyncMock(return_value=make_task(status=TaskStatus.COMPLETED))), \
+             patch.object(TaskPolicyService, 'evaluate_step',
+                          AsyncMock(return_value=PolicyResult())):
 
             result = await executor.execute_task(db_session, task)
 

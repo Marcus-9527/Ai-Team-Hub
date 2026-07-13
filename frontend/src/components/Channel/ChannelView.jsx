@@ -4,25 +4,23 @@ import {
   Send, Hash, Bot, User, X, Loader2,
   Trash2, Paperclip, Image,
   FileText, Eraser, Settings, Users,
-  UserPlus, UserMinus,
+  Circle, CheckCircle2, ListTodo, PlayCircle,
 } from 'lucide-react';
 import * as api from '../../services/api';
 import { parseSSEBuffer } from '../../services/eventBus';
 import { useTranslation } from '../../i18n';
 import { dispatchTaskEvent, isTaskEventType } from '../../services/taskEventBus';
 
-export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
+export default function ChannelView({ channelId, triggerRefresh, refreshKey, onOpenSettings }) {
   const t = useTranslation();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [channel, setChannel] = useState(null);
-  const [teammates, setTeammates] = useState([]);
   const [teammatesById, setTeammatesById] = useState({});
   const [pendingFiles, setPendingFiles] = useState([]);
   const [uploadStatus, setUploadStatus] = useState({});
   const [showActions, setShowActions] = useState(false);
-  const [showMemberList, setShowMemberList] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -48,7 +46,6 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
         message_id: m.message_id || m.id,  // fallback to DB id if message_id not set yet
       }));
       setMessages(reconciled);
-      setTeammates(allTeammates);
       const map = {};
       allTeammates.forEach(tm => { map[tm.id] = tm; });
       setTeammatesById(map);
@@ -75,14 +72,65 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
    */
   const handleStreamEvent = useCallback((event) => {
     const { type, message_id, role, phase, payload } = event || {};
-    if (!type || !message_id) return;
+    if (!type) return;  // message_id only required for teammate_message (dedup key)
 
-    // ── Dispatch task events to global bus (V3.0 Phase A) ──
+    // system_message (speaker header / cede notice) — backend sends no message_id
+    if (type === 'system_message') {
+      const text = payload?.content || '';
+      if (text) {
+        setMessages(prev => [...prev, {
+          id: 'sys-' + message_id + '-' + Date.now(),
+          role: 'system',
+          author_name: 'System',
+          teammate_id: '',
+          avatar_emoji: '💬',
+          content: text,
+          created_at: new Date().toISOString(),
+        }]);
+      }
+      return;
+    }
+
+    // error events may also carry no message_id
+    if (type === 'error') {
+      setMessages(prev => [...prev, {
+        id: 'err-' + message_id + '-' + Date.now(),
+        role: 'system',
+        author_name: 'System',
+        teammate_id: '',
+        avatar_emoji: '⚠️',
+        content: payload?.message || 'An error occurred',
+        created_at: new Date().toISOString(),
+      }]);
+      return;
+    }
+
+    if (type !== 'teammate_message') return;
+    if (!message_id) return;
+
+    // ── Task events: render as inline TaskCard ──
     if (isTaskEventType(type)) {
       dispatchTaskEvent(event);
-      // Task events don't render as chat bubbles, but we log them
+      // Only render major lifecycle events as cards
+      if (['task_started', 'plan_created', 'task_completed', 'execution_completed'].includes(type)) {
+        const taskId = event.task_id || message_id || '';
+        setMessages(prev => {
+          const existing = prev.find(m => m.role === 'task_card' && m._taskId === taskId);
+          const card = {
+            id: 'taskcard-' + taskId + '-' + type,
+            role: 'task_card',
+            _taskId: taskId,
+            taskEvent: { ...event },
+            created_at: new Date().toISOString(),
+          };
+          if (existing) {
+            return prev.map(m => m.id === existing.id ? { ...m, ...card, id: existing.id } : m);
+          }
+          return [...prev, card];
+        });
+      }
       console.log('[ChannelView] task event:', type, event);
-      return; // Don't render task events as chat bubbles
+      return; // Don't render as chat bubbles
     }
 
     // ONLY teammate_message creates/updates bubbles
@@ -222,8 +270,22 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
       if (!response.ok) {
         const errText = await response.text();
         let errMsg = errText;
-        try { errMsg = JSON.parse(errText).detail || errText; } catch {}
-        throw new Error(errMsg);
+        let recovery = null;
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.detail?.message || parsed.detail || errText;
+          recovery = parsed.detail?.recovery || null;  // P2 #5: structured recovery hint
+        } catch {}
+        const errMsgObj = {
+          id: 'err-' + Date.now(),
+          role: 'system',
+          author_name: 'System',
+          content: t('channel.error', errMsg),
+          recovery,
+        };
+        setMessages(prev => [...prev, errMsgObj]);
+        setLoading(false);
+        return;
       }
       // Phase 3: JSON event stream, no string parsing
       const reader = response.body.getReader();
@@ -332,70 +394,10 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
           <h2 className="font-bold text-[15px] text-ink">{channel?.name || 'Loading...'}</h2>
           <span className="text-xs text-ink-faint hidden md:inline truncate">{channel?.description}</span>
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-            {/* Member count badge → clickable manage teammates */}
-            <div className="relative">
-              <button
-                onClick={() => setShowMemberList(!showMemberList)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-canvas-lavender/50 text-xs text-ink-mute hover:bg-canvas-lavender/70 transition-all"
-              >
-                <Users size={12} />
-                <span>{channelTeammates.length}</span>
-              </button>
-              <AnimatePresence>
-                {showMemberList && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -4, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.95 }}
-                    className="absolute right-0 top-full mt-2 w-64 bg-surface rounded-xl shadow-card-lg border border-hairline py-1 z-50"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="px-4 py-2 text-xs font-semibold text-ink-faint uppercase tracking-wider border-b border-hairline">
-                      {t('channel.manage_teammates')} ({teammates.length})
-                    </div>
-                    <div className="max-h-72 overflow-y-auto">
-                      {teammates.length === 0 && (
-                        <p className="text-xs text-ink-faint text-center py-4">{t('channel.no_teammates_in_modal')}</p>
-                      )}
-                      {teammates.map(tm => {
-                        const inChannel = (channel?.teammate_ids || []).includes(tm.id);
-                        return (
-                          <div key={tm.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-hover transition-colors">
-                            <span className="text-base">{tm.avatar_emoji || '🤖'}</span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-ink truncate">{tm.name}</p>
-                              <p className="text-[10px] text-ink-faint truncate">{tm.model_provider} / {tm.model_name}</p>
-                            </div>
-                            {inChannel ? (
-                              <button
-                                onClick={async () => {
-                                  await api.removeTeammateFromChannel(channelId, tm.id);
-                                  setChannel(prev => ({ ...prev, teammate_ids: (prev?.teammate_ids || []).filter(id => id !== tm.id) }));
-                                  setMessages(prev => [...prev, { id: 'sys-' + Date.now(), role: 'system', author_name: 'System', content: `${tm.avatar_emoji} ${tm.name} removed from channel` }]);
-                                }}
-                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-semantic-error hover:bg-red-50 transition-colors"
-                              >
-                                <UserMinus size={13} /> {t('channel.remove')}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={async () => {
-                                  await api.addTeammateToChannel(channelId, tm.id);
-                                  setChannel(prev => ({ ...prev, teammate_ids: [...(prev?.teammate_ids || []), tm.id] }));
-                                  setMessages(prev => [...prev, { id: 'sys-' + Date.now(), role: 'system', author_name: 'System', content: `${tm.avatar_emoji} ${tm.name} added to channel` }]);
-                                }}
-                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-primary hover:bg-primary/5 transition-colors"
-                              >
-                                <UserPlus size={13} /> {t('channel.add')}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            {/* Current channel participating teammates — display only, not a management entry */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-canvas-lavender/50 text-xs text-ink-mute">
+              <Users size={12} />
+              <span>{channelTeammates.length}</span>
             </div>
             <div className="relative">
               <button
@@ -463,15 +465,10 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
               <div
                 key={tm.id}
                 className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-canvas-lavender/40 border border-hairline/50 flex-shrink-0"
-                title={tm.system_prompt ? tm.system_prompt.slice(0, 60) + '...' : tm.name}
               >
                 <span className="text-sm leading-none">{tm.avatar_emoji || '🤖'}</span>
                 <span className="text-[11px] font-medium text-ink-mute whitespace-nowrap">{tm.name}</span>
-                {tm.system_prompt && (
-                  <span className="text-[9px] text-ink-faint whitespace-nowrap max-w-[120px] truncate">
-                    · {tm.system_prompt.slice(0, 15)}
-                  </span>
-                )}
+
               </div>
             ))}
           </div>
@@ -486,6 +483,7 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey }) {
           if (msg.role === 'system') return <SystemMessage key={msg.id} message={msg} />;
           if (msg.role === 'loading') return <LoadingBubble key={msg.id} message={msg} />;
           if (msg.role === 'team') return <TeamMessageBubble key={msg.id} message={msg} teammatesById={teammatesById} />;
+          if (msg.role === 'task_card') return <TaskCard key={msg.id} message={msg} teammatesById={teammatesById} />;
           return <MessageBubble key={msg.id} message={msg} teammatesById={teammatesById} />;
         })}
 
@@ -627,6 +625,7 @@ function LoadingBubble({ message }) {
 
 // ─── System Message (join/leave/clear) ───
 function SystemMessage({ message }) {
+  const recovery = message.recovery;
   return (
     <motion.div
       initial={{ opacity: 0, y: -4 }}
@@ -636,6 +635,14 @@ function SystemMessage({ message }) {
       <div className="flex items-center gap-2 px-4 py-1.5 bg-surface-active/60 rounded-pill">
         <div className="w-1 h-1 rounded-full bg-ink-faint/40" />
         <p className="text-[11px] text-ink-faint font-medium">{message.content}</p>
+        {recovery?.action === 'open_settings' && (
+          <button
+            onClick={() => onOpenSettings?.()}
+            className="text-[11px] text-primary font-medium hover:underline ml-1"
+          >
+            {recovery.label || '前往设置'}
+          </button>
+        )}
         <div className="w-1 h-1 rounded-full bg-ink-faint/40" />
       </div>
     </motion.div>
@@ -703,12 +710,73 @@ function MessageBubble({ message, teammatesById }) {
   );
 }
 
+// ─── Task Card (rendered inline from task-lifecycle SSE events) ───
+function TaskCard({ message, teammatesById }) {
+  const t = useTranslation();
+  const ev = message.taskEvent || {};
+  const { type, task_id, payload = {} } = ev;
+
+  const TITLE = {
+    task_started: t('chat.task_started'),
+    plan_created: 'Plan created',
+    task_completed: t('chat.task_completed'),
+    execution_completed: t('chat.task_completed'),
+  };
+  const title = TITLE[type] || type;
+
+  // map teammate_id → name
+  const tmId = payload.teammate_id || payload.assigned_to || ev.teammate_id;
+  const assignee = tmId ? (teammatesById?.[tmId]?.name || payload.assigned_name || tmId) : null;
+
+  const tone = (type === 'task_completed' || type === 'execution_completed')
+    ? 'border-emerald-200 bg-emerald-50/50'
+    : type === 'task_started'
+      ? 'border-indigo-200 bg-indigo-50/40'
+      : 'border-hairline bg-gray-50';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-center py-1"
+    >
+      <div className={`w-full max-w-[420px] rounded-xl border ${tone} px-4 py-2.5`}>
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+          <p className="text-xs font-semibold text-ink">{title}</p>
+          {assignee && (
+            <span className="ml-auto text-[10px] text-ink-faint">{t('chat.assigned_to', assignee)}</span>
+          )}
+        </div>
+        {payload.summary && (
+          <p className="text-[11px] text-ink-mute mt-1 truncate">{payload.summary}</p>
+        )}
+        {task_id && (
+          <p className="text-[9px] text-ink-faint/70 mt-0.5 font-mono truncate">{task_id}</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Team Message Bubble (WeChat-style: one teammate = one bubble) ───
 function TeamMessageBubble({ message, teammatesById }) {
+  const t = useTranslation();
   const tmId = message.teammate_id || message.author_id;
   const tm = tmId ? teammatesById?.[tmId] : null;
   const avatar = tm?.avatar_emoji || message.avatar_emoji || '🤖';
   const name = tm?.name || message.author_name || 'Team';
+  const role = tm?.role || message.role || '';
+
+  // Map backend phase → chat status chip (only present for SSE-streamed msgs)
+  const PHASE = {
+    thinking: t('chat.phase_thinking'),
+    planning: t('chat.phase_planning'),
+    running: t('chat.phase_running'),
+    reviewing: t('chat.phase_reviewing'),
+    collaboration_round_1: t('chat.phase_working'),
+  };
+  const status = message.phase ? (PHASE[message.phase] || message.phase) : null;
 
   return (
     <motion.div
@@ -721,7 +789,15 @@ function TeamMessageBubble({ message, teammatesById }) {
           {avatar}
         </div>
         <div className="max-w-[75%]">
-          <p className="text-[11px] font-semibold mb-1 text-ink-mute">{name}</p>
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-[11px] font-semibold text-ink-mute">{name}</p>
+            {role && <span className="text-[10px] text-ink-faint">{role}</span>}
+            {status && (
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary">
+                {status}
+              </span>
+            )}
+          </div>
           <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed bg-canvas-lavender text-ink rounded-tl-sm message-content">
             <div className="message-text">
               {message.content.split('\n').filter(l => l.trim()).map((line, i) => (
@@ -758,7 +834,6 @@ function TeamResponseBubble({ response }) {
   }
 
   const author = response.author;
-  const personaTag = author.system_prompt ? author.system_prompt.slice(0, 15) : '';
 
   return (
     <div className="flex items-start gap-3">
@@ -768,11 +843,6 @@ function TeamResponseBubble({ response }) {
       <div className="max-w-[75%]">
         <div className="flex items-center gap-2 mb-1">
           <p className="text-[11px] font-semibold text-ink-mute">{author.name}</p>
-          {personaTag && (
-            <span className="text-[9px] text-ink-faint bg-surface-active/60 px-1.5 py-0.5 rounded-full">
-              {personaTag}
-            </span>
-          )}
         </div>
         <div className="px-4 py-3 rounded-2xl text-sm leading-relaxed bg-canvas-lavender text-ink rounded-tl-sm">
           <div className="message-text">

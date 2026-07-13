@@ -126,7 +126,7 @@ async def system_stats():
     global _maeos
     if _maeos is None:
         raise HTTPException(status_code=503, detail="Team Engine not initialized")
-    return _maeos.stats()
+    return await _maeos.stats()
 
 
 @router.get("/memory/stats")

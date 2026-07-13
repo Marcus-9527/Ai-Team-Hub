@@ -14,6 +14,7 @@
     "@react-three/drei": "9.88.17",
     "@react-three/fiber": "8.15.19",
     "@studio-freight/lenis": "^1.0.42",
+    "cmdk": "^1.1.1",
     "framer-motion": "^11.15.0",
     "gsap": "^3.15.0",
     "lucide-react": "^0.468.0",

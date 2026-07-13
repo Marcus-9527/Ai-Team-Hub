@@ -82,7 +82,7 @@ def decrypt_value(ciphertext: str) -> str:
     f = _get_fernet()
     try:
         return f.decrypt(ciphertext.encode()).decode()
-    except (InvalidToken, Exception):
+    except InvalidToken:
         # Not encrypted or unknown format — return as-is for migration compat
         return ciphertext
 

@@ -9,6 +9,7 @@ Storage: raw SQLite table `memory_items`, created on first use.
 from __future__ import annotations
 
 import json
+import math
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -22,6 +23,18 @@ logger = logging.getLogger("memory.service")
 
 # ── SQL constants ───────────────────────────────────────────────
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors. Returns 0.0 on zero-vector."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(av * bv for av, bv in zip(a, b))
+    na = math.sqrt(sum(v * v for v in a))
+    nb = math.sqrt(sum(v * v for v in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS memory_items (
     id              TEXT PRIMARY KEY,
@@ -29,6 +42,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
     content         TEXT NOT NULL DEFAULT '',
     source_id       TEXT NOT NULL DEFAULT '',
     relevance_score REAL NOT NULL DEFAULT 0.0,
+    embedding_json  TEXT NOT NULL DEFAULT '[]',
     created_at      TEXT NOT NULL,
     metadata_json   TEXT NOT NULL DEFAULT '{}'
 );
@@ -42,9 +56,9 @@ CREATE_INDEX_SQL = [
 
 INSERT_SQL = """
 INSERT OR REPLACE INTO memory_items
-    (id, memory_type, content, source_id, relevance_score, created_at, metadata_json)
+    (id, memory_type, content, source_id, relevance_score, embedding_json, created_at, metadata_json)
 VALUES
-    (:id, :memory_type, :content, :source_id, :relevance_score, :created_at, :metadata_json)
+    (:id, :memory_type, :content, :source_id, :relevance_score, :embedding_json, :created_at, :metadata_json)
 """
 
 SELECT_BY_SCOPE_SQL = """
@@ -127,6 +141,7 @@ class MemoryService:
                     "content": item.content,
                     "source_id": item.source_id,
                     "relevance_score": item.relevance_score,
+                    "embedding_json": json.dumps(item.embedding),
                     "created_at": item.created_at.isoformat(),
                     "metadata_json": json.dumps(item.metadata, ensure_ascii=False),
                 },
@@ -150,6 +165,7 @@ class MemoryService:
                         "content": item.content,
                         "source_id": item.source_id,
                         "relevance_score": item.relevance_score,
+                        "embedding_json": json.dumps(item.embedding),
                         "created_at": item.created_at.isoformat(),
                         "metadata_json": json.dumps(item.metadata, ensure_ascii=False),
                     },
@@ -233,6 +249,45 @@ class MemoryService:
             rows = result.fetchall()
         return [self._row_to_item(row) for row in rows]
 
+    # ── Teammate-scoped memory ──────────────────────────────────
+
+    async def query_teammate_memory(
+        self,
+        teammate_id: str,
+        *,
+        scope: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[MemoryItem]:
+        """Memories belonging to one teammate, optionally narrowed by scope.
+
+        Scopes (stored in metadata["scope"]):
+          - "private"   : teammate's own experience / decisions
+          - "workspace" : workspace-shared knowledge the teammate contributed
+          - "review"    : review verdicts / blockers this teammate produced
+        teammate_id is stored in metadata["teammate_id"] at write time.
+
+        ponytail: post-filters query() results (no JSON index in SQLite).
+        Fine at current scale; add a teammate_id column + index if volume grows.
+        """
+        if not teammate_id:
+            return []
+        # ponytail: post-filter over a large window (no JSON index in SQLite).
+        # Over-fetch 2000 — memory table is small in practice; if a teammate
+        # ever exceeds that, add a teammate_id column + index. 2000 keeps the
+        # scoped query correct without scanning the whole unlimited table.
+        items = await self.query(limit=2000)
+        out: list[MemoryItem] = []
+        for it in items:
+            meta = it.metadata or {}
+            if meta.get("teammate_id") != teammate_id:
+                continue
+            if scope is not None and meta.get("scope") != scope:
+                continue
+            out.append(it)
+        out.sort(key=lambda i: i.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                 reverse=True)
+        return out[:limit]
+
     async def stats(self) -> dict:
         """Get storage statistics."""
         await self._ensure_table()
@@ -270,6 +325,78 @@ class MemoryService:
             logger.info(f"Pruned {deleted} old {memory_type} items")
         return deleted
 
+    # ── Semantic search ──────────────────────────────────────────
+
+    async def semantic_search(
+        self,
+        query_vector: list[float],
+        *,
+        top_k: int = 10,
+        min_score: float = 0.1,
+        metadata_filters: Optional[dict] = None,
+    ) -> list[MemoryItem]:
+        """Find items with most similar embeddings via cosine similarity.
+
+        Loads all items with stored embeddings, scores against query_vector,
+        returns top_k above min_score. Falls back to empty list when no
+        embeddings exist (caller should then use keyword-based retrieval).
+
+        When metadata_filters is provided, only items whose metadata dict
+        matches ALL key→value pairs are considered. Useful for scope isolation
+        (e.g. teammate_id, scope, workspace_id).
+
+        ponytail: post-filters after full scan (no JSON index in SQLite).
+        Add a dedicated vector+metadata index if the memory table exceeds 10K rows.
+        """
+        if not query_vector:
+            return []
+        await self._ensure_table()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT * FROM memory_items WHERE embedding_json != '[]'"),
+            )
+            rows = result.fetchall()
+
+        items = [self._row_to_item(r) for r in rows]
+
+        # Apply metadata filters before scoring
+        if metadata_filters:
+            items = [
+                it for it in items
+                if all(it.metadata.get(k) == v for k, v in metadata_filters.items())
+            ]
+
+        if not items:
+            return []
+
+        scored: list[tuple[float, MemoryItem]] = []
+        for item in items:
+            if not item.embedding:
+                continue
+            sim = _cosine_similarity(query_vector, item.embedding)
+            if sim >= min_score:
+                scored.append((sim, item))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in scored[:top_k]]
+
+    @staticmethod
+    def compute_embedding(text: str, dim: int = 256) -> list[float]:
+        """Compute a deterministic char-bigram hash vector (no ML deps).
+
+        ponytail: hash-based vectorizer — swap for a real embedding model
+        when one is available. 256 dims gives ~2% collision on 10K texts.
+        """
+        vec = [0.0] * dim
+        t = text.lower()
+        for i in range(len(t) - 1):
+            h = hash(t[i:i+2]) % dim
+            vec[h] += 1.0
+        norm = math.sqrt(sum(v * v for v in vec))
+        if norm > 0:
+            vec = [v / norm for v in vec]
+        return vec
+
     # ── Helpers ───────────────────────────────────────────────
 
     @staticmethod
@@ -291,12 +418,21 @@ class MemoryService:
             except (json.JSONDecodeError, TypeError):
                 meta = {}
 
+        embedding = []
+        raw_emb = row._mapping.get("embedding_json", "[]")
+        if raw_emb:
+            try:
+                embedding = json.loads(raw_emb)
+            except (json.JSONDecodeError, TypeError):
+                embedding = []
+
         return MemoryItem(
             id=row._mapping.get("id", ""),
             memory_type=row._mapping.get("memory_type", MemoryType.EVENT),
             content=row._mapping.get("content", ""),
             source_id=row._mapping.get("source_id", ""),
             relevance_score=float(row._mapping.get("relevance_score", 0.0)),
+            embedding=embedding,
             created_at=created_at,
             metadata=meta,
         )

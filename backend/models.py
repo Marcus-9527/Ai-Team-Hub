@@ -4,7 +4,7 @@ SQLAlchemy models for AI Team Hub.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float, Integer
 from sqlalchemy.orm import relationship, backref
 
 from backend.database import Base
@@ -45,6 +45,18 @@ class Teammate(Base):
     model_provider = Column(String, nullable=False)   # e.g. "openai", "deepseek", "anthropic"
     model_name = Column(String, nullable=False)        # e.g. "gpt-4o", "deepseek-chat"
     api_key_ref = Column(String, nullable=True)        # reference to an APIKey id
+    # Phase 7: Teammate intelligence fields
+    skills = Column(JSON, default=list)                # ["python", "architecture", ...]
+    capabilities = Column(JSON, default=list)          # ["coding", "code_review", "writing", ...]
+    success_rate = Column(Float, default=0.0)          # ratio of successful executions
+    average_score = Column(Float, default=0.0)         # avg overall_quality score
+    execution_count = Column(Integer, default=0)       # total executions recorded
+    # Phase 14: Teammate evolution memory
+    strengths = Column(JSON, default=list)
+    weaknesses = Column(JSON, default=list)
+    learned_patterns = Column(JSON, default=list)
+    failed_patterns = Column(JSON, default=list)
+    preferred_tools = Column(JSON, default=list)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -155,27 +167,36 @@ from sqlalchemy import Integer
 
 class TaskStatus:
     """Task lifecycle states (stored as string in DB)."""
-    CREATED = "CREATED"
+    PENDING = "PENDING"
     PLANNING = "PLANNING"
-    EXECUTING = "EXECUTING"
-    PAUSED = "PAUSED"
+    ASSIGNED = "ASSIGNED"
+    RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
+    CREATED = "CREATED"      # alias for PENDING — legacy compat
+    EXECUTING = "EXECUTING"  # alias for RUNNING — legacy compat
+    PAUSED = "PAUSED"        # legacy compat, not in new pipeline
+    CANCELLED = "CANCELLED"  # legacy compat
 
     CHOICES = [
-        CREATED, PLANNING, EXECUTING, PAUSED,
-        COMPLETED, FAILED, CANCELLED,
+        PENDING, PLANNING, ASSIGNED, RUNNING,
+        COMPLETED, FAILED,
+        # legacy compat
+        CREATED, EXECUTING, PAUSED, CANCELLED,
     ]
 
     TRANSITIONS = {
-        CREATED: [PLANNING, CANCELLED, EXECUTING],
-        PLANNING: [EXECUTING, FAILED, CANCELLED],
-        EXECUTING: [COMPLETED, FAILED, PAUSED, CANCELLED],
-        PAUSED: [EXECUTING, CANCELLED],
+        PENDING: [PLANNING, FAILED, CANCELLED],
+        PLANNING: [ASSIGNED, RUNNING, EXECUTING, FAILED, CANCELLED],
+        ASSIGNED: [RUNNING, CANCELLED],
+        RUNNING: [COMPLETED, FAILED, CANCELLED, PAUSED],
         COMPLETED: [],        # terminal
-        FAILED: [PLANNING],   # allow re-plan
-        CANCELLED: [],        # terminal
+        FAILED: [PLANNING],    # allow re-plan
+        CANCELLED: [],         # terminal
+        # legacy compat
+        CREATED: [PLANNING, CANCELLED, EXECUTING],
+        EXECUTING: [COMPLETED, FAILED, PAUSED, CANCELLED],
+        PAUSED: [RUNNING, EXECUTING, CANCELLED],
     }
 
     @classmethod
@@ -225,10 +246,25 @@ class TaskModel(Base):
     title = Column(String, nullable=False, index=True)
     description = Column(Text, default="")
 
-    status = Column(String, nullable=False, default=TaskStatus.CREATED, index=True)
+    status = Column(String, nullable=False, default=TaskStatus.PENDING, index=True)
     priority = Column(Integer, default=2)
 
     intent = Column(String, default="")
+    review_status = Column(String, nullable=False, default="pending", index=True)  # pending | approved | rejected
+    git_commit = Column(String, nullable=True)
+
+    # ── Closure persistence (Engineer/Reviewer output written back here) ──
+    files_changed = Column(JSON, default=list)
+    commands_run = Column(JSON, default=list)
+    test_result = Column(Text, default="")
+    review_comments = Column(Text, default="")
+    review_rounds = Column(Integer, default=0)
+
+    # ── DAG hierarchy: parent_task / child_task / dependency ──
+    parent_task_id = Column(String, ForeignKey("tasks.id"), nullable=True, index=True)
+    child_task_ids = Column(JSON, default=list)
+    dependency = Column(JSON, default=list)
+
     created_by = Column(String, nullable=False)
 
     created_at = Column(DateTime, default=utcnow)
@@ -259,6 +295,16 @@ class TaskModel(Base):
             "status": self.status,
             "priority": self.priority,
             "intent": self.intent,
+            "review_status": self.review_status,
+            "git_commit": self.git_commit,
+            "files_changed": self.files_changed or [],
+            "commands_run": self.commands_run or [],
+            "test_result": self.test_result or "",
+            "review_comments": self.review_comments or "",
+            "review_rounds": self.review_rounds or 0,
+            "parent_task_id": self.parent_task_id,
+            "child_task_ids": self.child_task_ids or [],
+            "dependency": self.dependency or [],
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -283,6 +329,7 @@ class TaskStepModel(Base):
     )
     teammate_id = Column(String, nullable=True)
     order = Column(Integer, nullable=False)
+    deps = Column(JSON, default=list)  # step ids this step depends on (DAG edges)
 
     objective = Column(Text, default="")
     input_context = Column(Text, default="")
@@ -317,6 +364,7 @@ class TaskStepModel(Base):
             "task_id": self.task_id,
             "teammate_id": self.teammate_id,
             "order": self.order,
+            "deps": self.deps or [],
             "objective": self.objective,
             "input_context": self.input_context,
             "output": self.output,
@@ -511,6 +559,106 @@ class TaskPolicyModel(Base):
             "allowed_teammates": self.get_allowed_teammates(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 16: Policy Rule Model (Tool Action Gate)
+# ═══════════════════════════════════════════════════════════════
+
+
+class PolicyEffect:
+    ALLOW = "allow"
+    DENY = "deny"
+    APPROVAL_REQUIRED = "approval_required"
+    CHOICES = [ALLOW, DENY, APPROVAL_REQUIRED]
+
+
+class PolicyRuleModel(Base):
+    """A policy rule: who (subject) can/cannot do what (action) on what (resource)."""
+    __tablename__ = "policy_rules"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    subject = Column(String, nullable=False, index=True)    # role/teammate-id
+    action = Column(String, nullable=False, index=True)      # file_write | git.merge | …
+    resource = Column(String, default="*", index=True)       # glob pattern or "*"
+    effect = Column(String, nullable=False, default=PolicyEffect.ALLOW)
+    reason = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "subject": self.subject,
+            "action": self.action,
+            "resource": self.resource,
+            "effect": self.effect,
+            "reason": self.reason,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def _resource_matches(self, target: str) -> bool:
+        """Simple glob match: '*' matches everything, prefix/suffix wildcards work."""
+        if self.resource == "*":
+            return True
+        if self.resource.startswith("*") and self.resource.endswith("*"):
+            return self.resource[1:-1] in target
+        if self.resource.endswith("*"):
+            return target.startswith(self.resource[:-1])
+        return target == self.resource
+
+
+# ═══════════════════════════════════════════════════════════════
+# v3.2 Phase A: Execution Persistence Models
+# ═══════════════════════════════════════════════════════════════
+
+from sqlalchemy import Float, Integer as SAInteger
+
+
+class ExecutionRecordModel(Base):
+    """Persistent execution record — one per runtime execution."""
+    __tablename__ = "execution_records"
+
+    execution_id = Column(String, primary_key=True)
+    task_id = Column(String, default="", index=True)
+    teammate = Column(String, default="")
+    model = Column(String, default="")
+    status = Column(String, default="PENDING", index=True)
+    start_time = Column(Float, default=0.0)
+    end_time = Column(Float, default=0.0)
+    duration_ms = Column(SAInteger, default=0)
+    prompt_tokens = Column(SAInteger, default=0)
+    completion_tokens = Column(SAInteger, default=0)
+    total_tokens = Column(SAInteger, default=0)
+    cost_micro_usd = Column(SAInteger, default=0)
+    error = Column(Text, default="")
+    dag_id = Column(String, default="", index=True)
+    dag_node_id = Column(String, default="", index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    events = relationship(
+        "ExecutionEventModel",
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        order_by="ExecutionEventModel.timestamp",
+    )
+
+
+class ExecutionEventModel(Base):
+    """One event in an execution's timeline."""
+    __tablename__ = "execution_events"
+
+    id = Column(SAInteger, primary_key=True, autoincrement=True)
+    execution_id = Column(
+        String,
+        ForeignKey("execution_records.execution_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String, nullable=False)
+    timestamp = Column(Float, default=0.0)
+    payload = Column(JSON, default=dict)
+
+    execution = relationship("ExecutionRecordModel", back_populates="events")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -764,4 +912,191 @@ class ExecutionResultModel(Base):
             "replan_scope": self.replan_scope,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 6: Evaluation System (v1.0)
+# ═══════════════════════════════════════════════════════════════
+
+
+class EvaluationRecordModel(Base):
+    """Execution-level evaluation record — one per execution_id.
+
+    Rule-based scores (0.0–1.0) for latency, cost, artifact presence,
+    and error status.  Overall score is a weighted combination.
+    """
+    __tablename__ = "evaluation_records"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    execution_id = Column(
+        String,
+        ForeignKey("execution_records.execution_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    score = Column(Float, default=0.0)            # overall 0–1
+    status = Column(String, default="PENDING", index=True)  # PENDING | EVALUATED
+    latency_score = Column(Float, default=0.0)     # 0–1 (faster → higher)
+    cost_score = Column(Float, default=0.0)         # 0–1 (cheaper → higher)
+    artifact_score = Column(Float, default=0.0)     # 0–1 (more/better artifacts → higher)
+    error_score = Column(Float, default=1.0)        # 0–1 (no error → 1.0)
+    feedback = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+
+    execution = relationship("ExecutionRecordModel", backref="evaluation", uselist=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "execution_id": self.execution_id,
+            "score": self.score,
+            "status": self.status,
+            "latency_score": self.latency_score,
+            "cost_score": self.cost_score,
+            "artifact_score": self.artifact_score,
+            "error_score": self.error_score,
+            "feedback": self.feedback,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 5: Artifact System (v1.0)
+# ═══════════════════════════════════════════════════════════════
+
+
+class ArtifactModel(Base):
+    """An AI-generated artifact (file, image, code, etc.) produced by an execution."""
+    __tablename__ = "artifacts"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+    execution_id = Column(String, nullable=True, index=True)
+    type = Column(String, nullable=False, default="file", index=True)   # "file" | "image" | "code" | "text" | ...
+    name = Column(String, nullable=False)
+    path = Column(String, nullable=False)          # filesystem path of stored content
+    content_hash = Column(String, default="")       # SHA-256[:16] quick dedup
+    meta = Column(JSON, default=dict)               # arbitrary key-value (not named 'metadata' — reserved in SA)
+    created_at = Column(DateTime, default=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "execution_id": self.execution_id,
+            "type": self.type,
+            "name": self.name,
+            "path": self.path,
+            "content_hash": self.content_hash,
+            "metadata": self.meta or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 9: DAG Persistence Models
+# ═══════════════════════════════════════════════════════════════
+
+
+class DAGDefinitionModel(Base):
+    """Persistent DAG definition."""
+    __tablename__ = "dag_definitions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, default="")
+    status = Column(String, default="CREATED")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    nodes = relationship("DAGNodeModel", back_populates="dag",
+                         cascade="all, delete-orphan",
+                         order_by="DAGNodeModel.created_at")
+
+
+class DAGNodeModel(Base):
+    """Persistent DAG node — one task in a DAG."""
+    __tablename__ = "dag_nodes"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    dag_id = Column(String, ForeignKey("dag_definitions.id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    description = Column(Text, default="")
+    teammate = Column(String, default="")
+    deps = Column(JSON, default=list)
+    status = Column(String, default="PENDING", index=True)
+    max_retry = Column(SAInteger, default=0)
+    retry_count = Column(SAInteger, default=0)
+    strategy = Column(String, default="linear")
+    require_approval = Column(String, default="0")  # "0" | "1" — SQLite lacks BOOL
+    result = Column(Text, default="")
+    error = Column(Text, default="")
+    execution_id = Column(String, default="")
+    required_skills = Column(JSON, default=list)
+    selected_teammate_id = Column(String, default="")
+    assigned_at = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=utcnow)
+
+    dag = relationship("DAGDefinitionModel", back_populates="nodes")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 7: Automation Rule
+# ═══════════════════════════════════════════════════════════════
+
+
+class AutomationRuleModel(Base):
+    """Scheduled task automation rule — triggers task creation on interval."""
+    __tablename__ = "automation_rules"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    schedule_interval_sec = Column(SAInteger, default=300)  # 5 min default
+    task_title = Column(String, nullable=False)
+    task_intent = Column(Text, default="")
+    channel_id = Column(String, default="")
+    team_ids = Column(JSON, default=list)  # list of teammate IDs to include
+    is_active = Column(String, default="1")
+    trigger_event = Column(String, nullable=True)  # Phase 19: event-triggered (e.g. "task_created", "message_event")
+    last_triggered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 17: Policy Audit Decision Model
+# ═══════════════════════════════════════════════════════════════
+
+
+class PolicyDecisionModel(Base):
+    """Every policy ALLOW/DENY/APPROVAL_REQUIRED → one row."""
+    __tablename__ = "policy_decisions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    teammate_id = Column(String, default="", index=True)
+    action = Column(String, nullable=False, index=True)
+    resource = Column(String, default="*")
+    effect = Column(String, nullable=False, index=True)  # ALLOW | DENY | APPROVAL_REQUIRED
+    reason = Column(String, default="")
+    task_id = Column(String, default="", index=True)
+    workspace_id = Column(String, default="")
+    channel_id = Column(String, default="")
+    context_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "teammate_id": self.teammate_id,
+            "action": self.action,
+            "resource": self.resource,
+            "effect": self.effect,
+            "reason": self.reason,
+            "task_id": self.task_id,
+            "workspace_id": self.workspace_id,
+            "channel_id": self.channel_id,
+            "context": self.context_json if isinstance(self.context_json, dict) else {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

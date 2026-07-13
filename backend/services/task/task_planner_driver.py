@@ -61,8 +61,8 @@ def _build_planner_prompt(goal: str, context: dict | None = None) -> str:
     Build the user message for Planner MAEOS submission.
 
     Phase A: embeds the planner system prompt + goal as the user message,
-    because the MAEOS FSMWorker uses a generic system_prompt.
-    This approach works without modifying MAEOS.
+    because the runtime uses a generic system_prompt.
+    This approach works without modifying the runtime.
     """
     parts = [
         PLANNER_SYSTEM_PROMPT.strip(),

@@ -19,6 +19,7 @@ class MemoryType(str, Enum):
     Ordered by semantic breadth (widest first):
       GLOBAL      — system-wide rules, learned patterns, persistent facts
       WORKSPACE   — per-workspace decisions, conventions, preferences
+      TEAMMATE    — per-teammate preferences, style, learned patterns
       CHANNEL     — per-channel conversation themes, active topics
       TASK        — per-task goals, constraints, past plans
       EXECUTION   — per-execution outcomes, errors, performance signals
@@ -28,6 +29,7 @@ class MemoryType(str, Enum):
 
     GLOBAL = "GLOBAL"
     WORKSPACE = "WORKSPACE"
+    TEAMMATE = "TEAMMATE"
     CHANNEL = "CHANNEL"
     TASK = "TASK"
     EXECUTION = "EXECUTION"
@@ -41,6 +43,7 @@ class MemoryType(str, Enum):
             cls.EXECUTION,
             cls.DECISION,
             cls.TASK,
+            cls.TEAMMATE,
             cls.CHANNEL,
             cls.WORKSPACE,
             cls.EVENT,
@@ -65,6 +68,7 @@ class MemoryItem:
     content: str = ""
     source_id: str = ""       # FK-like: task_id | channel_id | workspace_id | execution_id
     relevance_score: float = 0.0
+    embedding: list[float] = field(default_factory=list)  # vector for semantic search
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -77,6 +81,7 @@ class MemoryItem:
             "content": self.content,
             "source_id": self.source_id,
             "relevance_score": self.relevance_score,
+            "embedding": self.embedding,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "metadata": dict(self.metadata),
         }
@@ -89,6 +94,7 @@ class MemoryItem:
             content=data.get("content", ""),
             source_id=data.get("source_id", ""),
             relevance_score=float(data.get("relevance_score", 0.0)),
+            embedding=list(data.get("embedding", [])),
             created_at=_parse_dt(data.get("created_at")),
             metadata=data.get("metadata", {}),
         )

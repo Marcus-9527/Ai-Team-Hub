@@ -125,9 +125,10 @@ class TestTaskApprovalService:
         assert result.status == ApprovalStatus.APPROVED
         assert result.approved_by == "admin"
 
-        # Task should be EXECUTING again
+        # Task should be RUNNING again
         task = await state.get_task(db_session, task.id)
-        assert task.status == TaskStatus.EXECUTING
+        assert task.status == TaskStatus.RUNNING
+
 
     @pytest.mark.asyncio
     async def test_approve_emits_approved_event(self, db_session: AsyncSession):
@@ -272,7 +273,7 @@ class TestExecutorApprovalIntegration:
         approval_svc = executor.approval
 
         with pytest.raises(ApprovalRequiredError):
-            await executor._execute_single_step(
+            await executor._submit_one(
                 db_session, task, step,
                 trace=None,
                 events=events,
@@ -324,8 +325,8 @@ class TestExecutorApprovalIntegration:
 
         # Verify resumed
         task = await state.get_task(db_session, task.id)
-        assert task.status == TaskStatus.EXECUTING
-
+        assert task.status == TaskStatus.RUNNING
+        # Approval should be APPROVED
         # Approval should be APPROVED
         approval = await svc.get_approval(db_session, approval.id)
         assert approval.status == ApprovalStatus.APPROVED

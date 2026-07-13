@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { Hash, ArrowLeft, Sparkles, Users, Plus, Check, UserPlus } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import * as api from '../../services/api';
-import { CHINESE_PROVIDERS, OVERSEAS_PROVIDERS } from '../../services/providers';
 
 const TEAMMATE_TEMPLATES = [
   {

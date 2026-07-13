@@ -23,11 +23,8 @@ from services.collaboration import (
     Event,
     SharedContext,
     ContextStore,
-    StateSync,
-    InMemoryConnection,
     get_event_bus,
     get_context_store,
-    get_state_sync,
 )
 
 
@@ -247,77 +244,9 @@ class TestContextStore:
         assert self.store.active_count == 2
 
 
-# ── State Sync Tests ──
+# ── State Sync Tests [V1.0: moved to legacy/collaboration/realtime.py] ──
+# TestStateSync class removed — realtime.py is in legacy/
 
-class TestStateSync:
-    def setup_method(self):
-        self.bus = EventBus()
-        self.sync = StateSync(event_bus=self.bus)
-        self.conn1 = InMemoryConnection("conn_1")
-        self.conn2 = InMemoryConnection("conn_2")
-
-    @pytest.mark.asyncio
-    async def test_register_and_subscribe(self):
-        self.sync.register_connection(self.conn1)
-        self.sync.register_connection(self.conn2)
-        assert self.sync.connection_count == 2
-
-        self.sync.subscribe_connection("conn_1", "task_1")
-        self.sync.subscribe_connection("conn_2", "task_1")
-        assert "task_1" in self.conn1.subscribed_tasks
-
-    @pytest.mark.asyncio
-    async def test_broadcast_on_event(self):
-        self.sync.register_connection(self.conn1)
-        self.sync.subscribe_connection("conn_1", "task_1")
-
-        await self.bus.emit(
-            EventType.TASK_UPDATED,
-            source="system",
-            task_id="task_1",
-            data={"state": "running"}
-        )
-        await asyncio.sleep(0.01)  # Let async dispatch complete
-
-        assert len(self.conn1.messages) == 1
-        assert self.conn1.messages[0].sync_type == "task_state"
-
-    @pytest.mark.asyncio
-    async def test_no_broadcast_to_unsubscribed(self):
-        self.sync.register_connection(self.conn1)
-        self.sync.register_connection(self.conn2)
-        self.sync.subscribe_connection("conn_1", "task_1")
-
-        await self.bus.emit(
-            EventType.TEAMMATE_COMPLETED,
-            source="agent:executor",
-            task_id="task_1",
-        )
-        await asyncio.sleep(0.01)
-
-        assert len(self.conn1.messages) == 1
-        assert len(self.conn2.messages) == 0
-
-    @pytest.mark.asyncio
-    async def test_unregister_cleans_subscriptions(self):
-        self.sync.register_connection(self.conn1)
-        self.sync.subscribe_connection("conn_1", "task_1")
-        self.sync.unregister_connection("conn_1")
-
-        assert self.sync.connection_count == 0
-
-    @pytest.mark.asyncio
-    async def test_push_stream_chunk(self):
-        self.sync.register_connection(self.conn1)
-        self.sync.subscribe_connection("conn_1", "task_stream")
-
-        await self.sync.push_stream_chunk("task_stream", "Hello ", "agent:executor")
-        await self.sync.push_stream_chunk("task_stream", "World!", "agent:executor")
-        await asyncio.sleep(0.01)
-
-        assert len(self.conn1.messages) == 2
-        assert self.conn1.messages[0].data["chunk"] == "Hello "
-        assert self.conn1.messages[1].data["chunk"] == "World!"
 
 
 # ── Integration Test ──
@@ -328,12 +257,6 @@ class TestIntegration:
         """Simulate a complete task lifecycle with collaboration layer."""
         bus = EventBus()
         store = ContextStore(event_bus=bus)
-        sync = StateSync(event_bus=bus)
-
-        # Setup connection
-        conn = InMemoryConnection("client_1")
-        sync.register_connection(conn)
-        sync.subscribe_connection("client_1", "task_full")
 
         # 1. Task created
         await bus.emit(EventType.TASK_CREATED, source="user:1", task_id="task_full")
@@ -357,15 +280,11 @@ class TestIntegration:
             data={"step": "implement", "status": "success"},
         )
 
-        # 5. Verify client received updates
-        await asyncio.sleep(0.05)
-        assert len(conn.messages) >= 2  # Task created + agent completed + more
-
-        # 6. Verify shared context state
+        # 5. Verify shared context state
         assert ctx.read("status") == "executing"
         assert ctx.read("plan") == {"steps": ["analyze", "implement", "review"]}
 
-        # 7. Verify event history
+        # 6. Verify event history
         all_events = bus.get_history(task_id="task_full")
         assert len(all_events) >= 3
 

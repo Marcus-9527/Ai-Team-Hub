@@ -19,6 +19,7 @@ from backend.models import (
 from backend.services.task.task_executor import TaskExecutor
 from backend.services.task.task_result import TaskResultHandler
 from backend.services.task.task_state import TaskStateManager
+from backend.services.task.task_policy import TaskPolicyService, PolicyResult
 from backend.services.runtime.retry_policy import (
     RetryPolicy, RetryDecision, FailureType, BackoffStrategy, RetryAction,
 )
@@ -56,41 +57,51 @@ def make_execution(**kwargs) -> TaskExecutionModel:
     return TaskExecutionModel(**defaults)
 
 
-class FakeMAEOS:
-    """Fake MAEOS with configurable fail pattern for retry testing."""
-
-    def __init__(self, fail_count: int = 0, fail_then_succeed: bool = False):
-        self._started = True
-        self._call_count = 0
-        self._fail_count = fail_count
-        self._fail_then_succeed = fail_then_succeed
-
-    async def submit(self, **kwargs) -> str:
-        self._call_count += 1
-        return f"maeos-retry-{self._call_count:04d}"
-
-    async def wait(self, task_id: str, timeout: float = 300.0):
-        self._call_count += 0  # not counting as separate
-        if self._fail_then_succeed and self._call_count <= 1:
-            return FakeMAEOSTask(task_id, status="FAILED", error="Transient error")
-        if self._fail_count > 0 and self._call_count <= self._fail_count:
-            return FakeMAEOSTask(task_id, status="FAILED", error="Transient error")
-        return FakeMAEOSTask(task_id, status="COMPLETED", result="Success!")
-
-    def get_status(self, task_id: str) -> dict:
-        return {"status": "COMPLETED"}
-
-    def stats(self):
-        return {"tasks_submitted": self._call_count}
-
-
-class FakeMAEOSTask:
-    def __init__(self, task_id: str, status="COMPLETED", result="", error=""):
+# Mock ExecutionRuntime: submit returns a task id, wait returns a RuntimeTask.
+class FakeRuntimeTask:
+    def __init__(self, task_id: str = "exec-0001", status: str = "COMPLETED",
+                 result: str = "", error: str = ""):
         self.id = task_id
         self.status = status
         self.result = result
         self.error = error
-        self.trace_report = {"trace_id": "trace-retry"}
+
+
+class FakeRuntime:
+    """Mock ExecutionRuntime used in place of MAEOS."""
+
+    def __init__(self, result_text: str = "", fail: bool = False,
+                 fail_ids: set = None, fail_count: int = 0,
+                 fail_then_succeed: bool = False):
+        self.result_text = result_text
+        self.fail = fail
+        self.fail_ids = fail_ids or set()
+        self.fail_count = fail_count
+        self.fail_then_succeed = fail_then_succeed
+        self._call_count = 0
+        self.submitted: list[str] = []
+
+    async def submit(self, description: str = "", priority: int = 2,
+                     intent: str = "", teammate: str = "",
+                     workspace_id: str = "", wait: bool = False,
+                     **kwargs) -> str:
+        self._call_count += 1
+        task_id = f"exec-{self._call_count:04d}"
+        self.submitted.append(task_id)
+        return task_id
+
+    async def wait(self, task_id: str, timeout: float = 300.0):
+        n = self._call_count
+        if self.fail:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated failure")
+        if task_id in self.fail_ids:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated MAEOS failure")
+        if self.fail_then_succeed and n == 1:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        if self.fail_count > 0 and n <= self.fail_count:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        return FakeRuntimeTask(task_id, status="COMPLETED",
+                               result=self.result_text or f"Result for {task_id}")
 
 
 # ── Related: RetryPolicy Unit Tests ──
@@ -199,9 +210,9 @@ class TestTaskExecutorRetry:
 
     async def test_retry_succeeds_on_second_attempt(self, db_session):
         """Step fails once, retries, succeeds on second attempt."""
-        maeos = FakeMAEOS(fail_then_succeed=True)
+        maeos = FakeRuntime(fail_then_succeed=True)
         executor = TaskExecutor(
-            maeos_instance=maeos,
+            runtime=maeos,
             retry_policy=RetryPolicy(max_retries=2, backoff_strategy=BackoffStrategy.FIXED, base_delay_ms=1),
         )
 
@@ -233,7 +244,9 @@ class TestTaskExecutorRetry:
                               id=s.id, status=TaskStepStatus.COMPLETED,
                               output=kw.get('output', '')))), \
              patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.COMPLETED))):
+                          AsyncMock(return_value=make_task(status=TaskStatus.COMPLETED))), \
+             patch.object(TaskPolicyService, 'evaluate_step',
+                          AsyncMock(return_value=PolicyResult())):
 
             result = await executor.execute_task(db_session, task)
 
@@ -241,9 +254,9 @@ class TestTaskExecutorRetry:
 
     async def test_retry_exhausted_marks_task_failed(self, db_session):
         """Step fails all retries → task FAILED."""
-        maeos = FakeMAEOS(fail_count=10)  # always fails
+        maeos = FakeRuntime(fail_count=10)  # always fails
         executor = TaskExecutor(
-            maeos_instance=maeos,
+            runtime=maeos,
             retry_policy=RetryPolicy(max_retries=2, backoff_strategy=BackoffStrategy.FIXED, base_delay_ms=1),
         )
 
@@ -267,7 +280,9 @@ class TestTaskExecutorRetry:
              patch.object(TaskStateManager, 'update_step',
                           AsyncMock(return_value=make_step(status=TaskStepStatus.FAILED))), \
              patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))):
+                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))), \
+             patch.object(TaskPolicyService, 'evaluate_step',
+                          AsyncMock(return_value=PolicyResult())):
 
             result = await executor.execute_task(db_session, task)
 
@@ -275,9 +290,9 @@ class TestTaskExecutorRetry:
 
     async def test_system_failure_aborts_immediately(self, db_session):
         """System-level error (e.g. timeout) → ABORT immediately, no retry."""
-        maeos = FakeMAEOS(fail_count=10)
+        maeos = FakeRuntime(fail_count=10)
         executor = TaskExecutor(
-            maeos_instance=maeos,
+            runtime=maeos,
             retry_policy=RetryPolicy(max_retries=5, backoff_strategy=BackoffStrategy.FIXED, base_delay_ms=1),
         )
 
@@ -297,7 +312,9 @@ class TestTaskExecutorRetry:
              patch.object(TaskStateManager, 'update_step',
                           AsyncMock(return_value=make_step(status=TaskStepStatus.FAILED))), \
              patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))):
+                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))), \
+             patch.object(TaskPolicyService, 'evaluate_step',
+                          AsyncMock(return_value=PolicyResult())):
 
             result = await executor.execute_task(db_session, task)
 

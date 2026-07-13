@@ -1,4 +1,4 @@
-"""Guardrail for the `terminal` MCP tool.
+"""Guardrail for tool-runtime terminal execution.
 
 When an LLM agent driving a task via ReAct passes natural-language prose
 instead of a real shell command (e.g. "检查 AI Team Hub 状态"), we must NOT

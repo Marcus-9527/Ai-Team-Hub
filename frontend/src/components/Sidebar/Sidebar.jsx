@@ -1,191 +1,144 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Hash, Plus, Settings, Users, ChevronDown,
-  Trash2, UserPlus, Home, ListTodo,
-} from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, Brain, FileCheck, Zap } from 'lucide-react';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
-import ConfirmDialog from '../ConfirmDialog';
+import CreateChannelModal from '../Channel/CreateChannelModal';
+
+const NAV_ITEMS = [
+  { view: 'new-topic',  icon: MessageSquare, key: 'sidebar.new_topic' },
+  { view: 'home',  icon: Inbox,         key: 'nav.inbox' },
+  { view: 'tasks', icon: ListTodo,      key: 'nav.tasks' },
+  { view: 'team',  icon: Users,         key: 'sidebar.ai_teammates' },
+  { view: 'brain', icon: Brain,         key: 'nav.brain' },
+  { view: 'proposals', icon: FileCheck, key: 'nav.proposals' },
+  { view: 'autonomous', icon: Zap,      key: 'nav.autonomous' },
+];
 
 export default function Sidebar({
-  activeChannelId, onSelectChannel, onOpenSettings,
-  onCreateChannel, onCreateTeammate = () => {},
-  onOpenTasks, showTasks,
-  refreshKey, triggerRefresh, showSettings,
+  activeView, onNavigate, showSettings, onOpenSettings,
+  channelId, onChannelSelect, showDashboard,
 }) {
   const t = useTranslation();
   const [channels, setChannels] = useState([]);
   const [teammates, setTeammates] = useState([]);
-  const [channelsExpanded, setChannelsExpanded] = useState(true);
-  const [teammatesExpanded, setTeammatesExpanded] = useState(true);
-  const [confirm, setConfirm] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  useEffect(() => { loadData(); }, [refreshKey]);
+  useEffect(() => {
+    Promise.all([api.listChannels(), api.listTeammates()])
+      .then(([chs, tms]) => { setChannels(chs); setTeammates(tms); })
+      .catch(() => {});
+  }, []);
 
-  const loadData = async () => {
-    try {
-      const [ch, tm] = await Promise.all([api.listChannels(), api.listTeammates()]);
-      setChannels(ch);
-      setTeammates(tm);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleDeleteChannel = (id, e, name) => {
-    e.stopPropagation();
-    setConfirm({
-      title: '删除频道',
-      message: `确定要删除频道「${name}」吗？此操作不可撤销。`,
-      confirmText: '删除频道',
-      onConfirm: async () => {
-        await api.deleteChannel(id);
-        triggerRefresh();
-      },
-    });
+  const handleChannelClick = (id) => {
+    onChannelSelect(id);
+    onNavigate('chat');
   };
 
   return (
-    <div className="w-64 bg-primary-deep text-white flex flex-col h-full flex-shrink-0 select-none">
-      {/* Clickable Logo/Header */}
-      <button
-        onClick={() => onSelectChannel(null)}
-        className="w-full px-4 py-5 border-b border-white/10 hover:bg-white/[0.03] transition-colors text-left"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center group-hover:bg-white/20 transition-colors">
-            <Users size={20} className="text-white" />
-          </div>
-          <div>
-            <h1 className="font-bold text-[15px] leading-tight">{t('app.title')}</h1>
-            <p className="text-[11px] text-white/50 font-medium">{t('app.subtitle')}</p>
-          </div>
-        </div>
-      </button>
+    <div className="w-60 bg-[#f4f2ef] border-r border-[#e2ddd7] flex flex-col h-full flex-shrink-0 select-none">
+      {/* Organization */}
+      <div className="px-4 py-3.5 border-b border-[#e2ddd7]">
+        <p className="text-sm font-semibold text-[#1d1d1d]">AI Team Hub</p>
+        <p className="text-[11px] text-[#9ca3af] mt-0.5">Workspace</p>
+      </div>
 
-      {/* Scrollable nav area */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {/* Channels */}
-        <div className="px-3 py-1.5 flex items-center gap-1">
-          <button onClick={() => setChannelsExpanded(!channelsExpanded)} className="flex items-center gap-1.5 flex-1 text-left">
-            <ChevronDown size={12} className={`text-white/30 transition-transform ${channelsExpanded ? '' : '-rotate-90'}`} />
-            <span className="text-xs font-semibold tracking-wide uppercase text-white/40">{t('sidebar.channels')}</span>
-          </button>
-          <button onClick={onCreateChannel} className="p-1 rounded hover:bg-white/10 transition-colors"><Plus size={14} className="text-white/50" /></button>
-        </div>
-        <AnimatePresence mode="wait">
-          {channelsExpanded && (
-            <motion.div
-              key="ch"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-            >
-              {channels.length === 0 && <p className="px-5 text-xs text-white/30 py-2">{t('sidebar.no_channels')}</p>}
-              {channels.map(ch => (
-                <div
-                  key={ch.id}
-                  onClick={() => onSelectChannel(ch.id)}
-                  className={`group flex items-center gap-2 px-5 py-1.5 mx-2 rounded-md cursor-pointer text-sm transition-all ${
-                    activeChannelId === ch.id ? 'bg-white/12 text-white font-medium' : 'text-white/60 hover:bg-white/8 hover:text-white/85'}`}
-                >
-                  <Hash size={14} className="text-white/40 flex-shrink-0" />
-                  <span className="truncate">{ch.name}</span>
-                  <button onClick={(e) => handleDeleteChannel(ch.id, e, ch.name)} className="ml-auto opacity-0 group-hover:opacity-60 hover:opacity-100 p-0.5 rounded transition-all"><Trash2 size={12} /></button>
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Teammates */}
-        <div className="mt-3 px-3 py-1.5 flex items-center gap-1">
-          <button onClick={() => setTeammatesExpanded(!teammatesExpanded)} className="flex items-center gap-1.5 flex-1 text-left">
-            <ChevronDown size={12} className={`text-white/30 transition-transform ${teammatesExpanded ? '' : '-rotate-90'}`} />
-            <span className="text-xs font-semibold tracking-wide uppercase text-white/40">{t('sidebar.teammates')}</span>
-          </button>
-          <button onClick={onCreateTeammate} className="p-1 rounded hover:bg-white/10 transition-colors"><Plus size={14} className="text-white/50" /></button>
-        </div>
-        <AnimatePresence mode="wait">
-          {teammatesExpanded && (
-            <motion.div
-              key="tm"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-            >
-              {teammates.length === 0 && (
-                <button onClick={onCreateTeammate} className="w-full flex items-center gap-2 px-5 py-2 text-xs text-white/40 hover:text-white/70 hover:bg-white/5 rounded-md transition-all">
-                  <UserPlus size={14} /><span>{t('sidebar.add_first')}</span>
-                </button>
-              )}
-              {teammates.map(tm => (
-                <div key={tm.id} className="group flex items-center gap-2 px-5 py-1.5 mx-2 rounded-md text-sm text-white/60 hover:bg-white/8 hover:text-white/85 cursor-default transition-all">
-                  <span className="text-sm">{tm.avatar_emoji}</span>
-                  <div className="flex-1 min-w-0">
-                    <span className="truncate text-xs block">{tm.name}</span>
-                    {tm.system_prompt && (
-                      <span className="block text-[10px] text-white/30 truncate">{tm.system_prompt.slice(0, 20)}</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setConfirm({
-                        title: '删除队友',
-                        message: `确定要从工作区移除「${tm.name}」吗？ta 会从所有频道中移除。`,
-                        confirmText: '移除队友',
-                        onConfirm: async () => {
-                          // 1. 从所有包含该队友的频道中移除
-                          const channelsWithTm = channels.filter(ch => (ch.teammate_ids || []).includes(tm.id));
-                          for (const ch of channelsWithTm) {
-                            await api.removeTeammateFromChannel(ch.id, tm.id);
-                          }
-                          // 2. 删除队友本身
-                          await api.deleteTeammate(tm.id);
-                          // 3. 等后端写入完成后再发系统消息 + 刷新
-                          await new Promise(r => setTimeout(r, 300));
-                          for (const ch of channelsWithTm) {
-                            try {
-                              await api.sendSystemMessage(ch.id, `${tm.avatar_emoji || '👤'} ${tm.name} removed from workspace`);
-                            } catch {}
-                          }
-                          triggerRefresh();
-                        },
-                      });
-                    }}
-                    className="ml-auto p-0.5 rounded opacity-0 group-hover:opacity-60 hover:opacity-100 hover:text-white transition-all"
-                  ><Trash2 size={12} /></button>
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Tasks */}
-        <div className="mt-1 px-3 py-1.5">
+      {/* Main Nav */}
+      <div className="py-2 px-2 space-y-0.5">
+        {NAV_ITEMS.map(({ view, icon: Icon, key }) => (
           <button
-            onClick={onOpenTasks}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-all ${
-              showTasks ? 'bg-white/12 text-white font-medium' : 'text-white/60 hover:bg-white/8 hover:text-white'
+            key={view}
+            onClick={() => onNavigate(view)}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${
+              activeView === view && !showSettings
+                ? 'bg-white text-[#1d1d1d] font-medium shadow-sm'
+                : 'text-[#5c5c5c] hover:bg-white/60 hover:text-[#1d1d1d]'
             }`}
           >
-            <ListTodo size={15} />
-            <span>{t('sidebar.tasks') || '任务'}</span>
+            <Icon size={16} className="flex-shrink-0 opacity-70" />
+            <span>{t(key)}</span>
           </button>
+        ))}
+      </div>
+
+      {/* Channels */}
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between px-4 py-2 mt-1">
+          <span className="text-[11px] font-semibold text-[#9ca3af] uppercase tracking-wider">
+            {t('sidebar.channels')}
+          </span>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="p-1 rounded hover:bg-white/60 text-[#9ca3af] hover:text-[#1d1d1d] transition-all"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+        <div className="overflow-y-auto space-y-0.5 px-2 pb-2">
+          {channels.map(ch => (
+            <button
+              key={ch.id}
+              onClick={() => handleChannelClick(ch.id)}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${
+                channelId === ch.id
+                  ? 'bg-white text-[#1d1d1d] font-medium shadow-sm'
+                  : 'text-[#5c5c5c] hover:bg-white/60 hover:text-[#1d1d1d]'
+              }`}
+            >
+              <Hash size={14} className="flex-shrink-0 opacity-40" />
+              <span className="truncate">{ch.name}</span>
+            </button>
+          ))}
+          {channels.length === 0 && (
+            <p className="text-[11px] text-[#9ca3af] text-center py-3">{t('sidebar.no_channels')}</p>
+          )}
+        </div>
+
+        {/* DM - AI Teammates */}
+        <div className="border-t border-[#e2ddd7] mx-4" />
+        <div className="px-4 py-2">
+          <span className="text-[11px] font-semibold text-[#9ca3af] uppercase tracking-wider">
+            {t('sidebar.teammates')}
+          </span>
+        </div>
+        <div className="overflow-y-auto space-y-0.5 px-2 pb-3">
+          {teammates.map(tm => (
+            <button
+              key={tm.id}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm text-[#5c5c5c] hover:bg-white/60 hover:text-[#1d1d1d] transition-all"
+            >
+              <span className="text-base flex-shrink-0 leading-none">{tm.avatar_emoji || '🤖'}</span>
+              <div className="min-w-0 flex-1 text-left flex items-center gap-2">
+                <span className="truncate">{tm.name}</span>
+                <span className="text-[10px] bg-[#4a154b]/10 text-[#4a154b] px-1.5 py-0.5 rounded font-medium flex-shrink-0 leading-tight">
+                  AI
+                </span>
+              </div>
+            </button>
+          ))}
+          {teammates.length === 0 && (
+            <p className="text-[11px] text-[#9ca3af] text-center py-3">{t('sidebar.add_first')}</p>
+          )}
         </div>
       </div>
 
-      <div className="border-t border-white/10 p-3 bg-primary-deep">
+      {/* Settings */}
+      <div className="border-t border-[#e2ddd7] px-2 py-2">
         <button
           onClick={onOpenSettings}
-          className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-all ${
-            showSettings ? 'bg-white/12 text-white font-medium' : 'text-white/60 hover:bg-white/8 hover:text-white'}`}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all ${
+            showSettings ? 'bg-white text-[#1d1d1d] font-medium shadow-sm' : 'text-[#5c5c5c] hover:bg-white/60 hover:text-[#1d1d1d]'
+          }`}
         >
-          <Settings size={15} /><span>{t('sidebar.settings')}</span>
+          <Settings size={16} className="flex-shrink-0 opacity-70" />
+          <span>{t('sidebar.settings')}</span>
         </button>
       </div>
-      <ConfirmDialog state={[confirm, setConfirm]} />
+      {showCreate && (
+        <CreateChannelModal
+          onClose={() => setShowCreate(false)}
+          onCreate={(id) => { setShowCreate(false); onChannelSelect(id); onNavigate('chat'); }}
+        />
+      )}
     </div>
   );
 }

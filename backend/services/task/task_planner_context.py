@@ -510,6 +510,16 @@ class PlannerContextBuilder:
             )
 
             if not compressed.text:
+                # ── Phase 13: Fallback to semantic search ──
+                try:
+                    from backend.services.memory.memory_context import MemoryContext
+                    semantic = await MemoryContext().retrieve_relevant_memory(
+                        task_title, channel_id=channel_id, top_k=5,
+                    )
+                    if semantic:
+                        return f"[1 item from semantic search]\n{semantic}"
+                except Exception:
+                    pass
                 return ""
 
             # Add a compact header with stats

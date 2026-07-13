@@ -29,33 +29,33 @@ import AgentActivityFeed from '../Workspace/AgentActivityFeed';
 
 // ── Tab config ──
 const TABS = [
-  { key: 'overview',  label: 'Overview',  icon: ListTodo },
-  { key: 'plan',      label: 'Plan',      icon: FileText },
-  { key: 'execution', label: 'Execution', icon: Activity },
-  { key: 'quality',   label: 'Quality',   icon: BarChart3 },
-  { key: 'approval',  label: 'Approval',  icon: ThumbsUp },
-  { key: 'memory',    label: 'Memory',    icon: BrainCircuit },
-  { key: 'team',      label: 'Team',      icon: User },
+  { key: 'overview',  i18n: 'task.tab.overview',  icon: ListTodo },
+  { key: 'plan',      i18n: 'task.tab.plan',      icon: FileText },
+  { key: 'execution', i18n: 'task.tab.execution', icon: Activity },
+  { key: 'quality',   i18n: 'task.tab.quality',   icon: BarChart3 },
+  { key: 'approval',  i18n: 'task.tab.approval',  icon: ThumbsUp },
+  { key: 'memory',    i18n: 'task.tab.memory',    icon: BrainCircuit },
+  { key: 'team',      i18n: 'task.tab.team',      icon: User },
 ];
 
-// ── Status config ──
-const STATUS_CONFIG = {
-  CREATED:    { label: '待处理',  color: 'text-gray-500',  bg: 'bg-gray-100' },
-  PLANNING:   { label: '规划中',  color: 'text-blue-600',  bg: 'bg-blue-100' },
-  EXECUTING:  { label: '执行中',  color: 'text-indigo-600', bg: 'bg-indigo-100' },
-  PAUSED:     { label: '已暂停',  color: 'text-amber-600', bg: 'bg-amber-100' },
-  COMPLETED:  { label: '已完成',  color: 'text-green-600', bg: 'bg-green-100' },
-  FAILED:     { label: '失败',    color: 'text-red-600',   bg: 'bg-red-100' },
-  CANCELLED:  { label: '已取消',  color: 'text-gray-500',  bg: 'bg-gray-100' },
+// ── Status config (label via i18n) ──
+const STATUS_COLOR = {
+  CREATED:    { color: 'text-gray-500',  bg: 'bg-gray-100' },
+  PLANNING:   { color: 'text-blue-600',  bg: 'bg-blue-100' },
+  EXECUTING:  { color: 'text-indigo-600', bg: 'bg-indigo-100' },
+  PAUSED:     { color: 'text-amber-600', bg: 'bg-amber-100' },
+  COMPLETED:  { color: 'text-green-600', bg: 'bg-green-100' },
+  FAILED:     { color: 'text-red-600',   bg: 'bg-red-100' },
+  CANCELLED:  { color: 'text-gray-500',  bg: 'bg-gray-100' },
 };
 
-const STEP_STATUS_CONFIG = {
-  PENDING:    { label: '待执行',  color: 'text-gray-400',  icon: Clock },
-  SCHEDULED:  { label: '已调度',  color: 'text-blue-500',  icon: Clock },
-  RUNNING:    { label: '执行中',  color: 'text-indigo-500', icon: Loader2 },
-  COMPLETED:  { label: '已完成',  color: 'text-green-500', icon: CheckCircle2 },
-  FAILED:     { label: '失败',    color: 'text-red-500',   icon: XCircle },
-  SKIPPED:    { label: '已跳过',  color: 'text-gray-400',  icon: XCircle },
+const STEP_STATUS_COLOR = {
+  PENDING:    { color: 'text-gray-400',  icon: Clock },
+  SCHEDULED:  { color: 'text-blue-500',  icon: Clock },
+  RUNNING:    { color: 'text-indigo-500', icon: Loader2 },
+  COMPLETED:  { color: 'text-green-500', icon: CheckCircle2 },
+  FAILED:     { color: 'text-red-500',   icon: XCircle },
+  SKIPPED:    { color: 'text-gray-400',  icon: XCircle },
 };
 
 export default function TaskDetailView({ taskId, onBack }) {
@@ -113,7 +113,7 @@ export default function TaskDetailView({ taskId, onBack }) {
       if (updated) setTask(updated);
       await loadTask();
     } catch (e) {
-      alert(`${action} 失败: ` + e.message);
+      alert(`${t('task.action_failed')} ${action}: ` + e.message);
     } finally {
       setActionLoading(null);
     }
@@ -167,29 +167,29 @@ export default function TaskDetailView({ taskId, onBack }) {
     </div>
   );
 
-  const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.CREATED;
+  const sc = STATUS_COLOR[task.status] || STATUS_COLOR.CREATED;
 
   // ── Available actions per status ──
   const AVAILABLE_ACTIONS = {
     CREATED: [
-      { key: 'plan', label: '开始规划', icon: PlayCircle, handler: taskApi.planTask, color: 'bg-blue-600 hover:bg-blue-700' },
+      { key: 'plan', label: t('task.action.plan'), icon: PlayCircle, handler: taskApi.planTask, color: 'bg-blue-600 hover:bg-blue-700' },
     ],
     PLANNING: [
-      { key: 'execute', label: '执行任务', icon: PlayCircle, handler: taskApi.executeTask, color: 'bg-indigo-600 hover:bg-indigo-700' },
-      { key: 'fail',    label: '标记失败', icon: XCircle,    handler: taskApi.failTask,   color: 'bg-red-500 hover:bg-red-600' },
+      { key: 'execute', label: t('task.action.execute'), icon: PlayCircle, handler: taskApi.executeTask, color: 'bg-indigo-600 hover:bg-indigo-700' },
+      { key: 'fail',    label: t('task.action.fail'), icon: XCircle,    handler: taskApi.failTask,   color: 'bg-red-500 hover:bg-red-600' },
     ],
     EXECUTING: [
-      { key: 'pause',   label: '暂停',    icon: PauseCircle, handler: taskApi.pauseTask,  color: 'bg-amber-500 hover:bg-amber-600' },
-      { key: 'complete', label: '标记完成', icon: CheckCircle2, handler: taskApi.completeTask, color: 'bg-green-600 hover:bg-green-700' },
-      { key: 'fail',    label: '标记失败', icon: XCircle,     handler: taskApi.failTask,   color: 'bg-red-500 hover:bg-red-600' },
+      { key: 'pause',   label: t('task.action.pause'), icon: PauseCircle, handler: taskApi.pauseTask,  color: 'bg-amber-500 hover:bg-amber-600' },
+      { key: 'complete', label: t('task.action.complete'), icon: CheckCircle2, handler: taskApi.completeTask, color: 'bg-green-600 hover:bg-green-700' },
+      { key: 'fail',    label: t('task.action.fail'), icon: XCircle,     handler: taskApi.failTask,   color: 'bg-red-500 hover:bg-red-600' },
     ],
     PAUSED: [
-      { key: 'resume',  label: '继续执行', icon: PlayCircle,  handler: taskApi.resumeTask,  color: 'bg-indigo-600 hover:bg-indigo-700' },
-      { key: 'cancel',  label: '取消任务', icon: XCircle,     handler: taskApi.cancelTask,  color: 'bg-gray-500 hover:bg-gray-600' },
+      { key: 'resume',  label: t('task.action.resume'), icon: PlayCircle,  handler: taskApi.resumeTask,  color: 'bg-indigo-600 hover:bg-indigo-700' },
+      { key: 'cancel',  label: t('task.action.cancel_task'), icon: XCircle,     handler: taskApi.cancelTask,  color: 'bg-gray-500 hover:bg-gray-600' },
     ],
     COMPLETED: [],
     FAILED: [
-      { key: 'plan',    label: '重新规划', icon: RefreshCw,   handler: taskApi.planTask,    color: 'bg-blue-600 hover:bg-blue-700' },
+      { key: 'plan',    label: t('task.action.replan'), icon: RefreshCw,   handler: taskApi.planTask,    color: 'bg-blue-600 hover:bg-blue-700' },
     ],
     CANCELLED: [],
   };
@@ -243,7 +243,7 @@ export default function TaskDetailView({ taskId, onBack }) {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-ink-mute border border-hairline hover:bg-gray-50 transition-all"
             >
               <XCircle size={13} />
-              取消
+              {t('task.action.cancel')}
             </button>
           </div>
         )}
@@ -251,7 +251,7 @@ export default function TaskDetailView({ taskId, onBack }) {
         {/* Description */}
         {task.description && (
           <div className="mb-4">
-            <h4 className="text-xs font-semibold text-ink-mute mb-1">描述</h4>
+            <h4 className="text-xs font-semibold text-ink-mute mb-1">{t('task.description')}</h4>
             <p className="text-sm text-ink leading-relaxed">{task.description}</p>
           </div>
         )}
@@ -259,24 +259,24 @@ export default function TaskDetailView({ taskId, onBack }) {
         {/* Metadata grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
           <div>
-            <span className="text-ink-faint block">创建者</span>
+            <span className="text-ink-faint block">{t('task.meta.created_by')}</span>
             <span className="text-ink font-medium">{task.created_by}</span>
           </div>
           <div>
-            <span className="text-ink-faint block">优先级</span>
+            <span className="text-ink-faint block">{t('task.meta.priority')}</span>
             <span className="text-ink font-medium">
-              {task.priority === 1 ? '高' : task.priority === 2 ? '中' : '低'}
+              {task.priority === 1 ? t('task.priority.high') : task.priority === 2 ? t('task.priority.medium') : t('task.priority.low')}
             </span>
           </div>
           {task.created_at && (
             <div>
-              <span className="text-ink-faint block">创建时间</span>
+              <span className="text-ink-faint block">{t('task.meta.created_at')}</span>
               <span className="text-ink">{new Date(task.created_at).toLocaleString('zh-CN')}</span>
             </div>
           )}
           {task.completed_at && (
             <div>
-              <span className="text-ink-faint block">完成时间</span>
+              <span className="text-ink-faint block">{t('task.meta.completed_at')}</span>
               <span className="text-ink">{new Date(task.completed_at).toLocaleString('zh-CN')}</span>
             </div>
           )}
@@ -286,9 +286,9 @@ export default function TaskDetailView({ taskId, onBack }) {
         {totalSteps > 0 && (
           <div className="mt-4 pt-4 border-t border-hairline">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-ink-mute">执行进度</span>
+              <span className="text-xs font-semibold text-ink-mute">{t('task.progress_label')}</span>
               <span className="text-xs text-ink-faint">
-                {completedSteps}/{totalSteps} 步骤 · {progressPct}%
+                {t('task.progress_meta', completedSteps, totalSteps, progressPct)}
               </span>
             </div>
             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -309,6 +309,87 @@ export default function TaskDetailView({ taskId, onBack }) {
         )}
       </div>
 
+      {/* ═══ Phase 4: Delivery Section (code, test, review, commit) ═══ */}
+      {(task.review_status !== 'pending' || task.git_commit || (task.files_changed || []).length > 0 || task.test_result) && (
+        <div className="mt-4 bg-white rounded-xl border border-hairline p-5">
+          <h3 className="text-sm font-bold text-ink mb-3 flex items-center gap-2">
+            <CheckCircle2 size={15} className="text-ink-faint" />
+            {t('task.delivery.title')}
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* Review status */}
+            <div>
+              <span className="text-ink-faint block mb-1">{t('task.delivery.review')}</span>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                task.review_status === 'approved' ? 'bg-green-100 text-green-600' :
+                task.review_status === 'rejected' ? 'bg-red-100 text-red-600' :
+                'bg-gray-100 text-gray-500'
+              }`}>
+                {task.review_status === 'approved' ? <CheckCircle2 size={11} /> :
+                 task.review_status === 'rejected' ? <XCircle size={11} /> : <Clock size={11} />}
+                {t('task.delivery.' + (task.review_status || 'pending'))}
+              </span>
+              {task.review_rounds > 1 && (
+                <span className="ml-2 text-ink-faint">({t('task.delivery.rounds', task.review_rounds)})</span>
+              )}
+            </div>
+
+            {/* Git commit */}
+            {task.git_commit && (
+              <div>
+                <span className="text-ink-faint block mb-1">{t('task.delivery.commit')}</span>
+                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{task.git_commit.slice(0, 12)}</code>
+              </div>
+            )}
+
+            {/* Files changed */}
+            {(task.files_changed || []).length > 0 && (
+              <div className="md:col-span-2">
+                <span className="text-ink-faint block mb-1">{t('task.delivery.files')} ({(task.files_changed || []).length})</span>
+                <div className="flex flex-wrap gap-1">
+                  {(task.files_changed || []).map((f, i) => (
+                    <code key={i} className="text-[11px] bg-gray-50 border border-hairline px-1.5 py-0.5 rounded font-mono">{f}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Commands run */}
+            {(task.commands_run || []).length > 0 && (
+              <div className="md:col-span-2">
+                <span className="text-ink-faint block mb-1">{t('task.delivery.commands')}</span>
+                <div className="bg-gray-50 rounded-lg p-2 space-y-1">
+                  {(task.commands_run || []).map((c, i) => (
+                    <code key={i} className="block text-[11px] font-mono text-ink-mute">$ {c}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Test result */}
+          {task.test_result && (
+            <div className="mt-3 pt-3 border-t border-hairline">
+              <span className="text-ink-faint block mb-1 text-xs font-semibold">{t('task.delivery.test_result')}</span>
+              <pre className="bg-gray-50 rounded-lg p-2.5 text-xs text-ink-mute whitespace-pre-wrap break-words max-h-32 overflow-y-auto font-mono">
+                {task.test_result.length > 500 ? task.test_result.slice(0, 500) + '...' : task.test_result}
+              </pre>
+            </div>
+          )}
+
+          {/* Review comments */}
+          {task.review_comments && (
+            <div className="mt-3 pt-3 border-t border-hairline">
+              <span className="text-ink-faint block mb-1 text-xs font-semibold">{t('task.delivery.comments')}</span>
+              <pre className="text-xs text-ink-mute whitespace-pre-wrap break-words leading-relaxed font-sans">
+                {task.review_comments}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Analytics Summary */}
       <div className="mt-4">
         <TaskAnalytics taskId={taskId} />
@@ -318,20 +399,20 @@ export default function TaskDetailView({ taskId, onBack }) {
       <div className="mt-4">
         <h3 className="text-sm font-bold text-ink mb-3 flex items-center gap-2">
           <Activity size={16} className="text-ink-faint" />
-          步骤列表
+          {t('task.steps_label')}
           <span className="text-xs text-ink-faint font-normal">({stepList.length})</span>
         </h3>
 
         {stepList.length === 0 && (
           <div className="bg-white rounded-xl border border-hairline p-8 text-center">
-            <p className="text-sm text-ink-faint">暂无步骤</p>
-            <p className="text-xs text-ink-faint mt-1">添加步骤或执行规划后这里会显示</p>
+            <p className="text-sm text-ink-faint">{t('task.no_steps')}</p>
+            <p className="text-xs text-ink-faint mt-1">{t('task.no_steps_hint')}</p>
           </div>
         )}
 
         <div className="space-y-2">
           {stepList.map((step, idx) => {
-            const ssc = STEP_STATUS_CONFIG[step.status] || STEP_STATUS_CONFIG.PENDING;
+            const ssc = STEP_STATUS_COLOR[step.status] || STEP_STATUS_COLOR.PENDING;
             const StepIcon = ssc.icon;
             const isLast = idx === stepList.length - 1;
             const isRunning = step.status === 'RUNNING';
@@ -367,9 +448,9 @@ export default function TaskDetailView({ taskId, onBack }) {
 
                   <div className="flex-1 min-w-0 pt-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-ink">{step.objective || `步骤 ${step.order}`}</span>
+                      <span className="font-semibold text-sm text-ink">{step.objective || t('task.step_label', step.order)}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${ssc.color.replace('text-', 'bg-').replace('-500', '-100')} ${ssc.color}`}>
-                        {ssc.label}
+                        {t('task.step.' + step.status)}
                       </span>
                     </div>
 
@@ -392,17 +473,17 @@ export default function TaskDetailView({ taskId, onBack }) {
                       <div className="mt-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
                         <div className="flex items-center gap-1.5 text-[11px] text-red-600 font-semibold mb-1">
                           <AlertTriangle size={12} />
-                          <span>错误</span>
+                          <span>{t('task.error_label')}</span>
                         </div>
                         <pre className="text-xs text-red-700 whitespace-pre-wrap break-words font-sans">{step.error}</pre>
                       </div>
                     )}
 
                     <div className="flex items-center gap-3 mt-2 text-[10px] text-ink-faint">
-                      {step.created_at && <span>创建: {new Date(step.created_at).toLocaleString('zh-CN')}</span>}
-                      {step.started_at && <span>开始: {new Date(step.started_at).toLocaleString('zh-CN')}</span>}
-                      {step.completed_at && <span>完成: {new Date(step.completed_at).toLocaleString('zh-CN')}</span>}
-                      {step.retry_count > 0 && <span>重试: {step.retry_count}次</span>}
+                      {step.created_at && <span>{t('task.approval.request_at')}: {new Date(step.created_at).toLocaleString('zh-CN')}</span>}
+                      {step.started_at && <span>{t('task.progress')}: {new Date(step.started_at).toLocaleString('zh-CN')}</span>}
+                      {step.completed_at && <span>{t('task.meta.completed_at')}: {new Date(step.completed_at).toLocaleString('zh-CN')}</span>}
+                      {step.retry_count > 0 && <span>{t('task.retry_count', step.retry_count)}</span>}
                     </div>
                   </div>
                 </div>
@@ -420,7 +501,7 @@ export default function TaskDetailView({ taskId, onBack }) {
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-ink-mute border border-hairline hover:bg-gray-50 disabled:opacity-50 transition-all"
         >
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          刷新
+          {t('task.refresh')}
         </button>
       </div>
     </>
@@ -436,7 +517,7 @@ export default function TaskDetailView({ taskId, onBack }) {
         <ListTodo size={16} className="text-ink-faint" />
         <h2 className="font-bold text-[15px] text-ink truncate">{task.title}</h2>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.color} ml-1`}>
-          {sc.label}
+          {t('task.status.' + task.status)}
         </span>
       </div>
 
@@ -456,7 +537,7 @@ export default function TaskDetailView({ taskId, onBack }) {
               }`}
             >
               <TabIcon size={13} />
-              {tab.label}
+              {t(tab.i18n)}
             </button>
           );
         })}

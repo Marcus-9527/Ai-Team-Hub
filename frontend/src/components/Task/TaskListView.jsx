@@ -17,22 +17,22 @@ import { useTranslation } from '../../i18n';
 import TaskDetailView from './TaskDetailView';
 import ConfirmDialog from '../ConfirmDialog';
 
-// ── Status config ──
-const STATUS_CONFIG = {
-  CREATED:    { label: '待处理',  color: 'text-gray-500',  bg: 'bg-gray-100', icon: Clock },
-  PLANNING:   { label: '规划中',  color: 'text-blue-600',  bg: 'bg-blue-100', icon: Loader2 },
-  EXECUTING:  { label: '执行中',  color: 'text-indigo-600', bg: 'bg-indigo-100', icon: PlayCircle },
-  PAUSED:     { label: '已暂停',  color: 'text-amber-600', bg: 'bg-amber-100', icon: PauseCircle },
-  COMPLETED:  { label: '已完成',  color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle2 },
-  FAILED:     { label: '失败',    color: 'text-red-600',   bg: 'bg-red-100',   icon: XCircle },
-  CANCELLED:  { label: '已取消',  color: 'text-gray-500',  bg: 'bg-gray-100',  icon: XCircle },
+// ── Status config (label via i18n) ──
+const STATUS_COLOR = {
+  CREATED:    { color: 'text-gray-500',  bg: 'bg-gray-100', icon: Clock },
+  PLANNING:   { color: 'text-blue-600',  bg: 'bg-blue-100', icon: Loader2 },
+  EXECUTING:  { color: 'text-indigo-600', bg: 'bg-indigo-100', icon: PlayCircle },
+  PAUSED:     { color: 'text-amber-600', bg: 'bg-amber-100', icon: PauseCircle },
+  COMPLETED:  { color: 'text-green-600', bg: 'bg-green-100', icon: CheckCircle2 },
+  FAILED:     { color: 'text-red-600',   bg: 'bg-red-100',   icon: XCircle },
+  CANCELLED:  { color: 'text-gray-500',  bg: 'bg-gray-100',  icon: XCircle },
 };
 const FILTER_OPTIONS = [
-  { value: '',     label: '全部' },
-  { value: 'CREATED',   label: '待处理' },
-  { value: 'EXECUTING', label: '执行中' },
-  { value: 'COMPLETED', label: '已完成' },
-  { value: 'FAILED',    label: '失败' },
+  { value: '',          key: 'task.filter.all' },
+  { value: 'CREATED',   key: 'task.filter.created' },
+  { value: 'EXECUTING', key: 'task.filter.executing' },
+  { value: 'COMPLETED', key: 'task.filter.completed' },
+  { value: 'FAILED',    key: 'task.filter.failed' },
 ];
 
 export default function TaskListView({ onBack }) {
@@ -68,15 +68,15 @@ export default function TaskListView({ onBack }) {
   const handleDelete = (task, e) => {
     e.stopPropagation();
     setConfirm({
-      title: '删除任务',
-      message: `确定要删除「${task.title}」吗？所有步骤和记录将被清除。`,
-      confirmText: '删除',
+      title: t('team.delete_title'),
+      message: t('team.delete_msg', task.title),
+      confirmText: t('team.remove'),
       onConfirm: async () => {
         try {
           await taskApi.deleteTask(task.id);
           refreshTasks();
         } catch (e) {
-          alert('删除失败: ' + e.message);
+          alert(t('task.delete_failed') + e.message);
         }
       },
     });
@@ -95,7 +95,7 @@ export default function TaskListView({ onBack }) {
           <ArrowLeft size={18} />
         </button>
         <ListTodo size={18} className="text-ink-faint" />
-        <h2 className="font-bold text-[15px] text-ink">{t('task.list_title') || '任务列表'}</h2>
+        <h2 className="font-bold text-[15px] text-ink">{t('task.list_title')}</h2>
         <span className="text-xs text-ink-faint">({tasks.length})</span>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -103,7 +103,7 @@ export default function TaskListView({ onBack }) {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary-press transition-all"
           >
             <Plus size={14} />
-            <span>{t('task.create_btn') || '新任务'}</span>
+            <span>{t('task.create_btn')}</span>
           </button>
         </div>
       </div>
@@ -120,7 +120,7 @@ export default function TaskListView({ onBack }) {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {f.label}
+            {t(f.key)}
           </button>
         ))}
       </div>
@@ -143,13 +143,13 @@ export default function TaskListView({ onBack }) {
         {!loading && tasks.length === 0 && (
           <div className="flex flex-col items-center justify-center h-60 text-ink-faint">
             <ListTodo size={48} className="mb-3 opacity-30" />
-            <p className="text-sm">{t('task.no_tasks') || '暂无任务'}</p>
+            <p className="text-sm">{t('task.no_tasks')}</p>
             <button
               onClick={() => setShowCreate(true)}
               className="mt-3 px-4 py-2 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary-press transition-all"
             >
               <Plus size={14} className="inline mr-1" />
-              {t('task.create_first') || '创建第一个任务'}
+              {t('task.create_first')}
             </button>
           </div>
         )}
@@ -157,7 +157,7 @@ export default function TaskListView({ onBack }) {
         {/* Task cards */}
         <div className="space-y-3">
           {tasks.map(task => {
-            const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.CREATED;
+            const sc = STATUS_COLOR[task.status] || STATUS_COLOR.CREATED;
             const StatusIcon = sc.icon;
             const progressPct = task.steps_count > 0
               ? Math.round(((task.steps_count - (task.status === 'COMPLETED' ? 0 : 1)) / task.steps_count) * 100)
@@ -180,7 +180,7 @@ export default function TaskListView({ onBack }) {
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-sm text-ink truncate">{task.title}</h3>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.color}`}>
-                        {sc.label}
+                        {t('task.status.' + task.status)}
                       </span>
                     </div>
                     {task.description && (
@@ -192,9 +192,38 @@ export default function TaskListView({ onBack }) {
                         <span>{new Date(task.created_at).toLocaleString('zh-CN')}</span>
                       )}
                       {task.steps_count > 0 && (
-                        <span>{task.steps_count} 个步骤</span>
+                        <span>{t('task.steps_count', task.steps_count)}</span>
                       )}
                     </div>
+                    {/* Delivery badges */}
+                    {(task.review_status !== 'pending' || (task.files_changed || []).length > 0 || task.test_result) && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {task.review_status !== 'pending' && (
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                            task.review_status === 'approved' ? 'bg-green-100 text-green-600' :
+                            task.review_status === 'rejected' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {task.review_status === 'approved' ? <CheckCircle2 size={9} /> :
+                             task.review_status === 'rejected' ? <XCircle size={9} /> : <Clock size={9} />}
+                            {t('task.delivery.' + (task.review_status || 'pending'))}
+                          </span>
+                        )}
+                        {(task.files_changed || []).length > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 text-[9px] font-medium">
+                            📄 {(task.files_changed || []).length} files
+                          </span>
+                        )}
+                        {task.test_result && (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                            task.test_result.includes('passed') || task.test_result.includes('PASSED')
+                              ? 'bg-green-100 text-green-600'
+                              : 'bg-amber-100 text-amber-600'
+                          }`}>
+                            🧪 {task.test_result.length > 20 ? task.test_result.slice(0, 20) + '...' : task.test_result}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {/* Progress bar */}
                     {task.status === 'EXECUTING' && task.steps_count > 0 && (
                       <div className="mt-2.5 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -229,41 +258,41 @@ export default function TaskListView({ onBack }) {
             className="bg-white rounded-2xl shadow-card-lg border border-hairline w-[420px] max-w-[90vw] p-6"
             onClick={e => e.stopPropagation()}
           >
-            <h3 className="text-base font-bold text-ink mb-1">{t('task.create_title') || '创建任务'}</h3>
-            <p className="text-xs text-ink-mute mb-4">{t('task.create_desc') || '创建一个多步骤执行任务'}</p>
+            <h3 className="text-base font-bold text-ink mb-1">{t('task.create_title')}</h3>
+            <p className="text-xs text-ink-mute mb-4">{t('task.create_desc')}</p>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.title') || '标题'}</label>
+                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.title')}</label>
                 <input
                   value={createData.title}
                   onChange={e => setCreateData(d => ({ ...d, title: e.target.value }))}
-                  placeholder="输入任务标题..."
+                  placeholder={t('task.title_ph')}
                   className="w-full px-3 py-2 rounded-xl border border-hairline text-sm text-ink bg-canvas focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                   autoFocus
                   onKeyDown={e => e.key === 'Enter' && handleCreate()}
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.description') || '描述'}</label>
+                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.description')}</label>
                 <textarea
                   value={createData.description}
                   onChange={e => setCreateData(d => ({ ...d, description: e.target.value }))}
-                  placeholder="描述任务目标..."
+                  placeholder={t('task.desc_ph')}
                   rows={3}
                   className="w-full px-3 py-2 rounded-xl border border-hairline text-sm text-ink bg-canvas focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.priority') || '优先级'}</label>
+                <label className="text-xs font-semibold text-ink-mute block mb-1">{t('task.priority')}</label>
                 <select
                   value={createData.priority}
                   onChange={e => setCreateData(d => ({ ...d, priority: Number(e.target.value) }))}
                   className="w-full px-3 py-2 rounded-xl border border-hairline text-sm text-ink bg-canvas focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                 >
-                  <option value={1}>高</option>
-                  <option value={2}>中</option>
-                  <option value={3}>低</option>
+                  <option value={1}>{t('task.priority.high')}</option>
+                  <option value={2}>{t('task.priority.medium')}</option>
+                  <option value={3}>{t('task.priority.low')}</option>
                 </select>
               </div>
             </div>
@@ -273,14 +302,14 @@ export default function TaskListView({ onBack }) {
                 onClick={() => setShowCreate(false)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-mute hover:bg-gray-100 transition-all"
               >
-                {t('task.cancel') || '取消'}
+                {t('task.cancel')}
               </button>
               <button
                 onClick={handleCreate}
                 disabled={creating || !createData.title.trim()}
                 className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-press disabled:opacity-50 transition-all"
               >
-                {creating ? '创建中...' : (t('task.create_btn') || '创建')}
+                {creating ? t('task.creating') : t('task.create_btn')}
               </button>
             </div>
           </motion.div>

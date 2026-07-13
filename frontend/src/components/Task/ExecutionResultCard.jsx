@@ -12,16 +12,17 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import { subscribeTaskEvents } from '../../services/taskEventBus';
+import { useTranslation } from '../../i18n';
 
-const QUALITY_LABELS = {
-  outcome: { label: '结果', icon: Target, color: 'text-green-600' },
-  completeness: { label: '完整性', icon: BarChart3, color: 'text-blue-600' },
-  coherence: { label: '连贯性', icon: GitMerge, color: 'text-indigo-600' },
-  accuracy: { label: '准确性', icon: Crosshair, color: 'text-amber-600' },
-  overall_quality: { label: '总体质量', icon: Star, color: 'text-purple-600' },
+const QUALITY_KEYS = {
+  outcome:          { icon: Target, color: 'text-green-600' },
+  completeness:     { icon: BarChart3, color: 'text-blue-600' },
+  coherence:        { icon: GitMerge, color: 'text-indigo-600' },
+  accuracy:         { icon: Crosshair, color: 'text-amber-600' },
+  overall_quality:  { icon: Star, color: 'text-purple-600' },
 };
 
-function ScoreBar({ name, value, config }) {
+function ScoreBar({ name, value, config, t }) {
   const Icon = config.icon;
   const pct = Math.round((value / 5) * 100);
   return (
@@ -29,7 +30,7 @@ function ScoreBar({ name, value, config }) {
       <div className="flex items-center justify-between mb-1.5">
         <span className="flex items-center gap-1.5 text-xs font-medium text-ink-mute">
           <Icon size={13} className={config.color} />
-          {config.label}
+          {t('task.quality.' + name)}
         </span>
         <span className="text-xs font-bold text-ink">{value?.toFixed(1) ?? '-'} / 5</span>
       </div>
@@ -46,6 +47,7 @@ function ScoreBar({ name, value, config }) {
 }
 
 export default function ExecutionResultCard({ taskId }) {
+  const t = useTranslation();
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -87,8 +89,8 @@ export default function ExecutionResultCard({ taskId }) {
     return (
       <div className="text-center py-12">
         <BarChart3 size={32} className="mx-auto mb-2 text-ink-faint opacity-40" />
-        <p className="text-sm text-ink-faint">暂无质量评分</p>
-        <p className="text-xs text-ink-faint mt-1">执行完成后会生成评分</p>
+        <p className="text-sm text-ink-faint">{t('task.quality.empty')}</p>
+        <p className="text-xs text-ink-faint mt-1">{t('task.quality.empty_hint')}</p>
       </div>
     );
   }
@@ -115,7 +117,7 @@ export default function ExecutionResultCard({ taskId }) {
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
                   r.plan_matched ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'
                 }`}>
-                  {r.plan_matched ? '匹配计划' : '偏离计划'}
+                  {r.plan_matched ? t('task.plan_matched') : t('task.plan_deviated')}
                 </span>
               )}
             </div>
@@ -123,8 +125,8 @@ export default function ExecutionResultCard({ taskId }) {
 
           {/* Score bars */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {Object.entries(QUALITY_LABELS).map(([key, cfg]) => (
-              <ScoreBar key={key} name={key} value={r[key]} config={cfg} />
+            {Object.entries(QUALITY_KEYS).map(([key, cfg]) => (
+              <ScoreBar key={key} name={key} value={r[key]} config={cfg} t={t} />
             ))}
           </div>
         </motion.div>

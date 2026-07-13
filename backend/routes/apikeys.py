@@ -8,11 +8,14 @@ All operations go through key_vault_service.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import get_db
+from backend.database import get_db, async_session
 from backend.middleware.auth import require_admin
 from backend.services import key_vault_service as kvs
+from backend.models import Teammate
+from backend.cache import teammate_cache
 
 logger = logging.getLogger("apikeys")
 
@@ -47,7 +50,31 @@ async def create_apikey(data: dict):
         raw_key=raw_key,
         base_url=base_url,
     )
+    # Propagate the new key to teammates that have no key yet, so a freshly
+    # configured key actually reaches the channels (P1 #1 root cause).
+    await _bind_key_to_unkeyed_teammates(result["id"])
     return result
+
+
+async def _bind_key_to_unkeyed_teammates(key_id: str) -> int:
+    """Bind a newly added/rotated key to every teammate lacking one.
+
+    ponytail: single active key per provider is the model; auto-binding it to
+    all unkeyed teammates is the minimal "workspace key inherits to channel"
+    behaviour the UI implies. Skip teammates that already have a key.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(Teammate).where(Teammate.api_key_ref.is_(None))
+        )
+        targets = result.scalars().all()
+        for tm in targets:
+            tm.api_key_ref = key_id
+            teammate_cache.invalidate(tm.id)
+        if targets:
+            await session.commit()
+            teammate_cache.invalidate("all")
+        return len(targets)
 
 
 @router.delete("/{apikey_id}")

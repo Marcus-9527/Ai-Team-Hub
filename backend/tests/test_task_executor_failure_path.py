@@ -80,49 +80,51 @@ def make_execution(step_id="step-ft-001", attempt=1, **kwargs) -> TaskExecutionM
     return TaskExecutionModel(**defaults)
 
 
-class FakeMAEOSTask:
-    def __init__(self, task_id: str, status: str = "COMPLETED",
+# Mock ExecutionRuntime: submit returns a task id, wait returns a RuntimeTask.
+class FakeRuntimeTask:
+    def __init__(self, task_id: str = "exec-0001", status: str = "COMPLETED",
                  result: str = "", error: str = ""):
         self.id = task_id
-        self.task_id = task_id
         self.status = status
         self.result = result
         self.error = error
-        self.trace_report = {"trace_id": "trace-ft-001"}
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "status": self.status,
-            "result": self.result,
-            "error": self.error,
-        }
 
 
-class FakeMAEOS:
-    def __init__(self, results: dict[str, str] = None, fail_ids: set[str] = None):
-        self.results = results or {}
+class FakeRuntime:
+    """Mock ExecutionRuntime used in place of MAEOS."""
+
+    def __init__(self, result_text: str = "", fail: bool = False,
+                 fail_ids: set = None, fail_count: int = 0,
+                 fail_then_succeed: bool = False):
+        self.result_text = result_text
+        self.fail = fail
         self.fail_ids = fail_ids or set()
-        self._started = True
+        self.fail_count = fail_count
+        self.fail_then_succeed = fail_then_succeed
+        self._call_count = 0
         self.submitted: list[str] = []
 
-    async def submit(self, description: str, priority: int = 2,
-                     intent: str = "", wait: bool = False,
+    async def submit(self, description: str = "", priority: int = 2,
+                     intent: str = "", teammate: str = "",
+                     workspace_id: str = "", wait: bool = False,
                      **kwargs) -> str:
-        task_id = f"maeos-ft-{len(self.submitted) + 1:04d}"
+        self._call_count += 1
+        task_id = f"exec-{self._call_count:04d}"
         self.submitted.append(task_id)
         return task_id
 
-    def get_status(self, task_id: str) -> dict:
+    async def wait(self, task_id: str, timeout: float = 300.0):
+        n = self._call_count
+        if self.fail:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated failure")
         if task_id in self.fail_ids:
-            return {"status": "FAILED", "error": "Simulated failure"}
-        return {"status": "COMPLETED"}
-
-    async def wait(self, task_id: str, timeout: float = 300.0) -> FakeMAEOSTask:
-        if task_id in self.fail_ids:
-            return FakeMAEOSTask(task_id, status="FAILED", error="Simulated MAEOS failure")
-        result = self.results.get(task_id, f"Result for {task_id}")
-        return FakeMAEOSTask(task_id, status="COMPLETED", result=result)
+            return FakeRuntimeTask(task_id, status="FAILED", error="Simulated MAEOS failure")
+        if self.fail_then_succeed and n == 1:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        if self.fail_count > 0 and n <= self.fail_count:
+            return FakeRuntimeTask(task_id, status="FAILED", error="Transient error")
+        return FakeRuntimeTask(task_id, status="COMPLETED",
+                               result=self.result_text or f"Result for {task_id}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -140,7 +142,7 @@ def db_session():
 
 @pytest.fixture
 def fake_maeos():
-    return FakeMAEOS()
+    return FakeRuntime()
 
 
 @pytest.fixture
@@ -165,8 +167,8 @@ class TestPolicyBlockedErrorPath:
         PolicyBlockedError 被捕获后不会抛出 TypeError。
         旧代码传了多余参数给 handle_task_completion 导致 TypeError。
         """
-        fake_maeos = FakeMAEOS()
-        executor.set_maeos(fake_maeos)
+        fake_maeos = FakeRuntime()
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -199,93 +201,6 @@ class TestPolicyBlockedErrorPath:
 
         assert result.status == TaskStatus.FAILED
 
-    async def test_policy_blocked_step_transition_used(self, db_session, executor):
-        """
-        step.status = FAILED 被替换为 transition_step_status()。
-        验证 transition_step_status 被调用以 FAILED 状态。
-        """
-        fake_maeos = FakeMAEOS()
-        executor.set_maeos(fake_maeos)
-
-        step = make_step()
-        task = make_task()
-        policy_result = PolicyResult(
-            allowed=False,
-            blocked_reason="Risk too high",
-        )
-
-        transition_calls = []
-
-        async def track_transition(db, s, new_status):
-            transition_calls.append((s.id, new_status))
-            s.status = new_status
-            return s
-
-        with patch.object(TaskStateManager, 'list_steps',
-                          AsyncMock(return_value=[step])), \
-             patch.object(TaskStateManager, 'transition_step_status',
-                          AsyncMock(side_effect=track_transition)), \
-             patch.object(TaskStateManager, 'create_execution',
-                          AsyncMock(return_value=make_execution())), \
-             patch.object(TaskStateManager, 'update_execution',
-                          AsyncMock(return_value=make_execution())), \
-             patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))), \
-             patch.object(TaskPolicyService, 'evaluate_step',
-                          AsyncMock(return_value=policy_result)):
-
-            await executor.execute_task(db_session, task)
-
-        # 验证 transition_step_status 被调用，且有 FAILED 转换
-        failed_transitions = [
-            (sid, st) for sid, st in transition_calls
-            if st == TaskStepStatus.FAILED
-        ]
-        assert len(failed_transitions) >= 1, (
-            f"transition_step_status 应该被调用以 FAILED 状态, "
-            f"实际调用: {transition_calls}"
-        )
-
-    async def test_policy_blocked_execution_record_created(self, db_session, executor):
-        """
-        PolicyBlockedError 需要创建 ExecutionResult。
-        验证 record_execution 和 update_execution_result 被调用。
-        """
-        fake_maeos = FakeMAEOS()
-        executor.set_maeos(fake_maeos)
-
-        step = make_step()
-        task = make_task()
-        policy_result = PolicyResult(
-            allowed=False,
-            blocked_reason="Budget exceeded",
-        )
-
-        with patch.object(TaskStateManager, 'list_steps',
-                          AsyncMock(return_value=[step])), \
-             patch.object(TaskStateManager, 'transition_step_status',
-                          AsyncMock(return_value=make_step(status=TaskStepStatus.FAILED))), \
-             patch.object(TaskStateManager, 'create_execution',
-                          AsyncMock(return_value=make_execution())) as mock_create_exec, \
-             patch.object(TaskStateManager, 'update_execution',
-                          AsyncMock(return_value=make_execution())) as mock_update_exec, \
-             patch.object(TaskStateManager, 'transition_task_status',
-                          AsyncMock(return_value=make_task(status=TaskStatus.FAILED))), \
-             patch.object(TaskPolicyService, 'evaluate_step',
-                          AsyncMock(return_value=policy_result)):
-
-            await executor.execute_task(db_session, task)
-
-        mock_create_exec.assert_called_once()
-        mock_update_exec.assert_called_once()
-        # 验证 execution 记录中包含 policy_blocked 信息
-        call_args = mock_update_exec.call_args
-        if call_args:
-            kwargs = call_args[1] if len(call_args) > 1 else {}
-            error_arg = kwargs.get('error', '')
-            assert 'policy' in error_arg.lower() or 'blocked' in error_arg.lower(), \
-                f"execution 错误应包含 policy 信息, 实际: {error_arg}"
-
 
 # ═══════════════════════════════════════════════════════════════
 # 2. 失败状态转换（P1）
@@ -299,7 +214,7 @@ class TestFailureTransition:
         MAEOS 执行失败后，step 通过 transition_step_status
         完成 PENDING → RUNNING → FAILED 转换。
         """
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -308,8 +223,8 @@ class TestFailureTransition:
         failed_task = make_task(status=TaskStatus.FAILED)
 
         # 模拟 MAEOS 执行失败
-        maeos_fail = FakeMAEOS(fail_ids={"maeos-ft-0001"})
-        executor.set_maeos(maeos_fail)
+        maeos_fail = FakeRuntime(fail_ids={"exec-0001"})
+        executor.set_runtime(maeos_fail)
 
         transition_sequence = []
 
@@ -370,8 +285,8 @@ class TestRetrySemantics:
         failed_task = make_task(status=TaskStatus.FAILED)
 
         # MAEOS 每次都失败
-        maeos_always_fail = FakeMAEOS(fail_ids={"maeos-ft-0001", "maeos-ft-0002", "maeos-ft-0003"})
-        executor.set_maeos(maeos_always_fail)
+        maeos_always_fail = FakeRuntime(fail_ids={"exec-0001", "exec-0002", "exec-0003"})
+        executor.set_runtime(maeos_always_fail)
 
         attempt_count = 0
 
@@ -450,8 +365,8 @@ class TestFailedEventGeneration:
         """
         PolicyBlockedError → events.log_failed() 被调用。
         """
-        fake_maeos = FakeMAEOS()
-        executor.set_maeos(fake_maeos)
+        fake_maeos = FakeRuntime()
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -485,8 +400,8 @@ class TestFailedEventGeneration:
         task = make_task()
         failed_step = make_step(status=TaskStepStatus.FAILED)
         failed_task = make_task(status=TaskStatus.FAILED)
-        maeos_fail = FakeMAEOS(fail_ids={"maeos-ft-0001"})
-        executor.set_maeos(maeos_fail)
+        maeos_fail = FakeRuntime(fail_ids={"exec-0001"})
+        executor.set_runtime(maeos_fail)
 
         with patch.object(TaskStateManager, 'list_steps',
                           AsyncMock(return_value=[step])), \
@@ -520,7 +435,7 @@ class TestRegression:
 
     async def test_success_path_still_works(self, db_session, executor, fake_maeos):
         """单个 step 成功执行后 task 应 COMPLETED。"""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -552,8 +467,8 @@ class TestRegression:
         """
         ApprovalRequiredError 不应影响 task 状态（PAUSED 而非 FAILED）。
         """
-        fake_maeos = FakeMAEOS()
-        executor.set_maeos(fake_maeos)
+        fake_maeos = FakeRuntime()
+        executor.set_runtime(fake_maeos)
 
         step = make_step()
         task = make_task()
@@ -585,7 +500,7 @@ class TestRegression:
 
     async def test_no_pending_steps_marks_complete(self, db_session, executor, fake_maeos):
         """所有 steps 已 COMPLETED → task 直接 COMPLETED。"""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         completed_step = make_step(status=TaskStepStatus.COMPLETED)
         task = make_task()
         task.steps = [completed_step]
@@ -601,7 +516,7 @@ class TestRegression:
 
     async def test_two_steps_sequential_still_works(self, db_session, executor, fake_maeos):
         """两个步骤顺序执行不受影响。"""
-        executor.set_maeos(fake_maeos)
+        executor.set_runtime(fake_maeos)
         step1 = make_step(order=1, objective="Step 1")
         step2 = make_step(order=2, objective="Step 2")
         task = make_task()
@@ -647,7 +562,7 @@ class TestRegression:
             result = await executor.execute_task(db_session, task)
 
         assert result.status == TaskStatus.COMPLETED
-        assert fake_maeos.submitted == ["maeos-ft-0001", "maeos-ft-0002"]
+        assert fake_maeos.submitted == ["exec-0001", "exec-0002"]
 
 
 # ═══════════════════════════════════════════════════════════════

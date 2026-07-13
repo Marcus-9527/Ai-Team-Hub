@@ -24,9 +24,11 @@ Provides:
   GET    /api/tasks/{task_id}/progress    — Get execution progress
 """
 
+import asyncio
+import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -34,14 +36,29 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.services.runtime.execution_store import SSEBroadcaster
+from backend.services.task.task_orchestrator import TaskOrchestrator, get_task_broadcaster
 from backend.services.task.task_manager import TaskManager
 from backend.services.task.task_executor import TaskExecutor
+from backend.services.runtime.executor import ExecutionRuntime
 from backend.services.task.task_approval_service import TaskApprovalService
 from backend.services.task.task_policy import TaskPolicyService, RiskLevel
-from backend.services.task.task_plan_service import TaskPlanService
+from backend.services.task.task_plan_service import (
+    TaskPlanService,
+    PlanConversionError,
+    EmptyPlanError,
+    NoActivePlanError,
+    PolicyBlockedError,
+)
 from backend.services.task.task_plan_review import (
     TaskPlanReviewService,
     ReviewGateBlockedError,
+)
+
+from backend.services.task.task_hooks import (
+    TaskLifecycleEvent,
+    TaskHookContext,
+    get_task_hook_registry,
 )
 
 logger = logging.getLogger("routes.tasks")
@@ -51,6 +68,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 _manager: Optional[TaskManager] = None
 _executor: Optional[TaskExecutor] = None
+_runtime: Optional[ExecutionRuntime] = None
 
 
 def _get_manager() -> TaskManager:
@@ -66,6 +84,14 @@ def _get_executor() -> TaskExecutor:
     if _executor is None:
         _executor = TaskExecutor()
     return _executor
+
+
+def _get_runtime() -> ExecutionRuntime:
+    """Get or create the ExecutionRuntime singleton."""
+    global _runtime
+    if _runtime is None:
+        _runtime = ExecutionRuntime(max_workers=4)
+    return _runtime
 
 
 # ── Approval Singleton ──
@@ -154,6 +180,14 @@ class TaskResponse(BaseModel):
     updated_at: Optional[str]
     completed_at: Optional[str]
     steps_count: int
+    # ── Phase 4 delivery fields ──
+    review_status: Optional[str] = "pending"
+    git_commit: Optional[str] = None
+    files_changed: List[str] = []
+    commands_run: List[str] = []
+    test_result: str = ""
+    review_comments: str = ""
+    review_rounds: int = 0
 
 
 class TaskDetailResponse(TaskResponse):
@@ -308,7 +342,7 @@ class PlanReviewResponse(BaseModel):
 
 @router.post("", response_model=TaskResponse, status_code=201)
 async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new task."""
+    """Create a new task. Returns immediately — orchestration runs in background."""
     mgr = _get_manager()
     task = await mgr.create_task(
         db,
@@ -344,7 +378,37 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)
     except Exception as e:
         logger.debug(f"[ROUTES] TASK_CREATED dispatch failed (non-fatal): {e}")
 
+    # ── Background orchestration: plan → execute (no blocking) ──
+    goal = req.intent or req.title or req.description
+    if goal:
+        asyncio.create_task(_background_orchestrate(task.id, goal))
+
     return _task_to_response(task)
+
+
+async def _background_orchestrate(task_id: str, goal: str) -> None:
+    """Run TaskOrchestrator in background with its own DB session."""
+    from backend.database import async_session
+    async with async_session() as db:
+        try:
+            runtime = _get_runtime()
+            orch = TaskOrchestrator(runtime=runtime)
+            await orch.start_task(db, task_id, goal)
+            await db.commit()
+            logger.info("[BG-ORCH] Task %s completed via background orchestration", task_id[:8])
+        except Exception as e:
+            logger.warning("[BG-ORCH] Background orchestration for %s failed: %s", task_id[:8], e)
+            try:
+                await db.rollback()
+                # Mark task FAILED so it's not left in a weird state
+                from backend.services.task.task_manager import TaskManager
+                mgr = TaskManager()
+                task = await mgr.get_task(db, task_id)
+                if task and task.status not in ("COMPLETED", "FAILED", "CANCELLED"):
+                    await mgr.fail(db, task_id)
+                    await db.commit()
+            except Exception:
+                pass
 
 
 @router.get("", response_model=TaskListResponse)
@@ -423,9 +487,154 @@ async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{task_id}/plan", response_model=TaskResponse)
 async def plan_task(task_id: str, db: AsyncSession = Depends(get_db)):
-    """Transition task: CREATED → PLANNING."""
+    """Analyze task goal, generate plan, assign teammates, and create steps.
+
+    Flow: TaskAnalyzer -> PlanningEngine (+ LLM via MAEOS) -> DAGBuilder
+          -> TeammateSelector -> save plan -> create steps -> PLANNING
+
+    Falls back to keyword-only analysis when MAEOS/LLM is unavailable.
+    """
     mgr = _get_manager()
-    return await _transition_task(mgr, db, task_id, mgr.start_planning)
+
+    # 1. Get task
+    task = await mgr.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    goal = task.intent or task.title or task.description
+    if not goal:
+        raise HTTPException(status_code=400, detail="Task has no goal to plan")
+
+    from backend.services.planner.planning_engine import PlanningEngine, PlanningError
+
+    dag = None
+    engine = PlanningEngine()
+
+    # 2. Try full PlanningEngine (MAEOS + LLM), fall back to keyword-only
+    try:
+        dag = await engine.plan(
+            goal=goal,
+            context={"task_id": task.id, "priority": task.priority},
+            task_id=task.id,
+        )
+        logger.info(
+            "[PLAN] PlanningEngine produced %d nodes for task %s",
+            len(dag.nodes), task_id,
+        )
+    except (PlanningError, ImportError, RuntimeError) as e:
+        logger.warning(
+            "[PLAN] PlanningEngine failed (%s: %s) - fallback to keyword analysis",
+            type(e).__name__, e,
+        )
+
+    # 3. If PlanningEngine failed, build minimal DAG from keyword analysis
+    if dag is None or not dag.nodes:
+        from backend.services.planner.task_analyzer import TaskAnalyzer
+        from backend.services.planner.dag_builder import DAGBuilder
+        from backend.services.task.task_planner_schema import TaskPlan, TaskStepProposal
+
+        analyzer = TaskAnalyzer()
+        analysis = analyzer.analyze(goal)
+        task_type = analysis.task_type
+
+        from backend.services.teammate_intelligence import SkillRegistry, TeammateSelector
+        required_skills = SkillRegistry.get_skills(task_type)
+
+        profiles = await TeammateSelector.recommend_by_skills(
+            required_skills, top_n=3, db=db,
+        )
+
+        if profiles:
+            steps = []
+            for i, p in enumerate(profiles):
+                steps.append(TaskStepProposal(
+                    order=i + 1,
+                    teammate_id=p.id,
+                    objective=f"{goal} - {p.role or p.name}",
+                    risk_level="LOW",
+                ))
+            plan = TaskPlan(
+                task_id=task_id,
+                title=f"Plan: {goal[:60]}",
+                description=f"Keyword analysis [{task_type}], {len(steps)} steps",
+                steps=steps,
+                risk_level="LOW",
+            )
+            dag = DAGBuilder().build(plan)
+
+    # 4. No plan at all -> fail
+    if dag is None or not dag.nodes:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to generate any steps for this task",
+        )
+
+    # 5. Assign teammates via TeammateSelector for each DAG node
+    from backend.services.teammate_intelligence import TeammateSelector
+
+    for node in dag.nodes.values():
+        if node.required_skills and not node.selected_teammate_id and not node.teammate:
+            try:
+                profiles = await TeammateSelector.recommend_by_skills(
+                    node.required_skills, top_n=1, db=db,
+                )
+                if profiles:
+                    node.selected_teammate_id = profiles[0].id
+                    node.teammate = profiles[0].name
+                    logger.info(
+                        "[PLAN] Assigned %s -> node %s (skills=%s)",
+                        profiles[0].name, node.id[:8], node.required_skills,
+                    )
+            except Exception as e:
+                logger.warning("[PLAN] Teammate assignment failed for node %s: %s",
+                               node.id[:8], e)
+
+    # 6. Save the plan via TaskPlanService
+    plan_service = _get_plan_service()
+    plan_steps = []
+    ordered_nodes = sorted(dag.nodes.values(), key=lambda n: list(dag.nodes.keys()).index(n.id))
+    for i, node in enumerate(ordered_nodes):
+        plan_steps.append({
+            "order": i + 1,
+            "teammate_id": node.selected_teammate_id or node.teammate or "",
+            "objective": node.description,
+            "depends_on": [],
+            "risk_level": "LOW",
+            "requires_approval": node.require_approval,
+        })
+
+    await plan_service.save_plan(
+        db,
+        task_id=task_id,
+        title=dag.name or f"Plan for {task.title}",
+        description=f"DAG with {len(dag.nodes)} nodes",
+        steps=plan_steps,
+        confidence=0.8,
+    )
+
+    # 7. Create TaskSteps directly (skip review gate for auto-planning)
+    for i, node in enumerate(ordered_nodes):
+        teammate_id = node.selected_teammate_id or node.teammate or ""
+        await mgr.state.create_step(
+            db,
+            task_id=task_id,
+            order=i + 1,
+            objective=node.description,
+            teammate_id=teammate_id,
+        )
+
+    logger.info(
+        "[PLAN] Created %d steps for task %s with teammates: %s",
+        len(dag.nodes), task_id,
+        [n.teammate for n in ordered_nodes if n.teammate],
+    )
+
+    # 8. Transition to PLANNING
+    task = await mgr.start_planning(db, task_id)
+    await db.commit()
+    await db.refresh(task)
+
+    return _task_to_response(task)
 
 
 @router.post("/{task_id}/execute", response_model=TaskDetailResponse)
@@ -443,13 +652,12 @@ async def execute_task(task_id: str, db: AsyncSession = Depends(get_db)):
     
     # Now execute all steps through MAEOS
     try:
-        # Get MAEOS instance
-        from backend.routes.maeos import _get_maeos
-        maeos = await _get_maeos()
+        # Get ExecutionRuntime
+        runtime = _get_runtime()
         
-        # Get executor and wire MAEOS
+        # Get executor and wire runtime
         executor = _get_executor()
-        executor.set_maeos(maeos)
+        executor.set_runtime(runtime)
         
         # Execute the task (runs all pending steps)
         task = await executor.execute_task(db, task)
@@ -459,11 +667,6 @@ async def execute_task(task_id: str, db: AsyncSession = Depends(get_db)):
         # ── Dispatch TASK_COMPLETED/FAILED with rich context ──
         if task.status in ("COMPLETED", "FAILED"):
             try:
-                from backend.services.task.task_hooks import (
-                    TaskLifecycleEvent,
-                    TaskHookContext,
-                    get_task_hook_registry,
-                )
                 lifecycle = (
                     TaskLifecycleEvent.TASK_COMPLETED
                     if task.status == "COMPLETED"
@@ -483,9 +686,8 @@ async def execute_task(task_id: str, db: AsyncSession = Depends(get_db)):
                 logger.debug(f"[ROUTES] Execute event dispatch failed (non-fatal): {exc}")
 
     except RuntimeError as e:
-        # MAEOS not available - task stays in EXECUTING but steps fail
-        logger.error(f"MAEOS not available: {e}")
-        raise HTTPException(status_code=503, detail=f"MAEOS not available: {e}")
+        logger.error(f"ExecutionRuntime not available: {e}")
+        raise HTTPException(status_code=503, detail=f"ExecutionRuntime not available: {e}")
     except Exception as e:
         logger.error(f"Task execution failed: {e}")
         raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
@@ -516,14 +718,14 @@ async def cancel_task(task_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{task_id}/complete", response_model=TaskResponse)
 async def complete_task(task_id: str, db: AsyncSession = Depends(get_db)):
-    """Transition task: EXECUTING → COMPLETED."""
+    """Transition task: RUNNING → COMPLETED."""
     mgr = _get_manager()
     return await _transition_task(mgr, db, task_id, mgr.complete)
 
 
 @router.post("/{task_id}/fail", response_model=TaskResponse)
 async def fail_task(task_id: str, db: AsyncSession = Depends(get_db)):
-    """Transition task: EXECUTING/PLANNING → FAILED."""
+    """Transition task: RUNNING/PLANNING → FAILED."""
     mgr = _get_manager()
     return await _transition_task(mgr, db, task_id, mgr.fail)
 
@@ -596,6 +798,12 @@ def _steps_loaded(task):
 
 
 def _task_to_response(task) -> TaskResponse:
+    files_changed = task.files_changed if isinstance(task.files_changed, list) else (
+        json.loads(task.files_changed) if isinstance(task.files_changed, str) and task.files_changed else []
+    )
+    commands_run = task.commands_run if isinstance(task.commands_run, list) else (
+        json.loads(task.commands_run) if isinstance(task.commands_run, str) and task.commands_run else []
+    )
     return TaskResponse(
         id=task.id,
         channel_id=task.channel_id,
@@ -610,6 +818,14 @@ def _task_to_response(task) -> TaskResponse:
         updated_at=task.updated_at.isoformat() if task.updated_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
         steps_count=len(task.steps) if _steps_loaded(task) and task.steps else 0,
+        # Phase 4 delivery fields
+        review_status=getattr(task, "review_status", "pending") or "pending",
+        git_commit=getattr(task, "git_commit", None),
+        files_changed=files_changed or [],
+        commands_run=commands_run or [],
+        test_result=getattr(task, "test_result", "") or "",
+        review_comments=getattr(task, "review_comments", "") or "",
+        review_rounds=getattr(task, "review_rounds", 0) or 0,
     )
 
 
@@ -617,7 +833,7 @@ def _task_to_detail(task) -> TaskDetailResponse:
     base = _task_to_response(task)
     return TaskDetailResponse(
         **base.model_dump(),
-        steps=[_step_to_dict(s) for s in (task.steps or [])] if _steps_loaded(task) else [],
+        steps=[_step_to_dict(s) for s in (task.steps or [])],
     )
 
 
@@ -979,6 +1195,48 @@ def _status_label(status: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# QA-1: Task SSE Event Stream
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/{task_id}/events")
+async def stream_task_events(task_id: str):
+    """SSE real-time event stream for a task's lifecycle.
+
+    Events: planning_started, team_created, dag_created,
+            execution_started, execution_completed.
+    """
+    broadcaster = get_task_broadcaster()
+    sub = broadcaster.subscribe(f"task:{task_id}")
+
+    async def event_stream():
+        import json
+        import asyncio
+        try:
+            deadline = asyncio.get_event_loop().time() + 600  # 10 min
+            while asyncio.get_event_loop().time() < deadline:
+                try:
+                    event = await asyncio.wait_for(sub.queue.get(), timeout=30)
+                    yield event
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+            yield f"data: {json.dumps({'type': 'stream_end', 'data': {'reason': 'timeout'}})}\n\n"
+        finally:
+            broadcaster.unsubscribe(f"task:{task_id}", sub)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # Approval Routes (Phase C1)
 # ═══════════════════════════════════════════════════════════════
 
@@ -1189,18 +1447,17 @@ async def apply_task_plan(
     await db.commit()
     await db.refresh(task)
 
-    # Step 3: Execute through MAEOS
+    # Step 3: Execute through ExecutionRuntime
     executor = _get_executor()
     try:
-        from backend.routes.maeos import _get_maeos
-        maeos = await _get_maeos()
-        executor.set_maeos(maeos)
+        runtime = _get_runtime()
+        executor.set_runtime(runtime)
         task = await executor.execute_task(db, task)
         await db.commit()
         await db.refresh(task)
     except RuntimeError as e:
-        # MAEOS not available — task stays in EXECUTING, steps are PENDING
-        logger.warning(f"MAEOS not available during plan apply: {e}")
+        # ExecutionRuntime not available — task stays in EXECUTING, steps are PENDING
+        logger.warning(f"ExecutionRuntime not available during plan apply: {e}")
     except Exception as e:
         logger.error(f"Task execution after plan apply failed: {e}")
 

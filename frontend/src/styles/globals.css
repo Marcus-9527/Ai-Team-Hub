@@ -13,6 +13,14 @@
   --accent-light: #8B5CF6;
   --accent-glow: rgba(109, 40, 255, 0.15);
   --accent-glow-strong: rgba(109, 40, 255, 0.4);
+
+  /* ── Light-theme design tokens (used by Brain/Proposal/Autonomous pages) ──
+     ponytail: these alias the real theme so those pages resolve instead of
+     falling through to body's white text. Keep in sync with tailwind.config.js. */
+  --color-bg: #faf8f5;        /* canvas */
+  --color-ink: #1d1d1d;       /* ink.DEFAULT */
+  --color-ink-faint: #9ca3af; /* ink.faint */
+  --color-primary: #4a154b;   /* primary.DEFAULT */
 }
 
 * {

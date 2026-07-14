@@ -48,6 +48,7 @@ export default {
   'nav.brain': '队友大脑',
   'nav.proposals': '提案审批',
   'nav.autonomous': '自主协作',
+  'nav.system_health': '系统健康',
 
   /* ── Welcome ── */
   'welcome.title': '欢迎使用 AI Team Hub',

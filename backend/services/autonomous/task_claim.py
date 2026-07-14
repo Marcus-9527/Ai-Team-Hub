@@ -143,13 +143,6 @@ class TaskClaimManager:
         """Get all claim attempts for a task."""
         return list(self._claims.get(task_id, []))
 
-    async def get_claim_count(self, task_id: str) -> int:
-        return len(self._claims.get(task_id, []))
-
-    async def list_open_tasks(self) -> list[str]:
-        """Return task_ids that have claims but no owner yet (timed out)."""
-        return [tid for tid, owner in self._owners.items() if not owner]
-
     async def clear(self, task_id: str) -> None:
         """Release claim data (when task completes/fails)."""
         async with self._lock:

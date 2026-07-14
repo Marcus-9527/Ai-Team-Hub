@@ -83,4 +83,3 @@ async def test_clear_releases():
 
     await manager.clear(task_id)
     assert await manager.get_owner(task_id) is None
-    assert await manager.get_claim_count(task_id) == 0

@@ -49,10 +49,10 @@ def _mock_rtask(*, task_id="m1", result="done", status="COMPLETED", error=""):
 
 
 def _make_dag(name="电商设计"):
-    """Build a 2-node DAG — teammate assignment happens via TeammateSelector."""
+    """Build a 2-node DAG with pre-assigned teammates (selector tested separately)."""
     dag = DAGDefinition(name=name)
-    n1 = DAGNode(description="需求分析", required_skills=["analysis"])
-    n2 = DAGNode(description="架构设计", required_skills=["architecture"])
+    n1 = DAGNode(description="需求分析", required_skills=["analysis"], teammate="分析专家")
+    n2 = DAGNode(description="架构设计", required_skills=["architecture"], teammate="架构师")
     dag.add_node(n1)
     dag.add_node(n2)
     return dag

@@ -30,9 +30,9 @@ class DAGStore:
     """
 
     def __init__(self, db_url: str = ""):
-        from backend.database import DB_PATH, Base
+        from backend.database import Base, get_sync_db_url
 
-        self._db_url = db_url or f"sqlite:///{DB_PATH}"
+        self._db_url = db_url or get_sync_db_url()
         self._engine = create_engine(
             self._db_url,
             echo=False,

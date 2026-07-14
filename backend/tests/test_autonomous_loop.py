@@ -1,9 +1,12 @@
-"""test_autonomous_loop.py — Phase 19: Autonomous Runtime Integration.
+"""test_autonomous_loop.py — Autonomous Runtime Integration (updated Phase 24)
 
 Covers:
-1. Event → wakeup → execute (via _on_task_created)
-2. evaluate_context() freshness cede
+1. evaluate_context() freshness cede
+2. Event bus dispatch
 3. Teammate state transitions (WORKING/IDLE/OFFLINE)
+4. Cede protocol relevance
+
+Phase 24: removed dead TASK_CREATED handler tests.
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -25,7 +28,6 @@ pytestmark = pytest.mark.asyncio
 async def test_evaluate_context_reads_channel():
     """evaluate_context should fetch channel messages and return a decision."""
     cede = CedeProtocol()
-    # Inject a fake _fetch_channel_messages to avoid DB
     cede._fetch_channel_messages = AsyncMock(return_value=[
         "How do I implement JWT auth?",
         "Has anyone done this before?",
@@ -41,55 +43,50 @@ async def test_evaluate_context_reads_channel():
     )
     assert decision in (CedeDecision.RESPOND, CedeDecision.CEDE, CedeDecision.IGNORE)
     assert record_id
-    # Verify the decision was recorded
     records = await cede.get_message_decisions("msg_1")
     assert len(records) == 1
     assert records[0].teammate_id == "tm_eng"
 
 
 async def test_evaluate_context_dedup():
-    """After a teammate already decided, evaluate_context should still return a decision (cede handles dedup)."""
+    """After a teammate already decided, evaluate_context should CEDE."""
     cede = CedeProtocol()
     cede._fetch_channel_messages = AsyncMock(return_value=["Some message"])
     cede._load_teammate = AsyncMock(return_value={
         "id": "tm_a", "name": "A", "role": "engineer",
     })
-    # First call
     d1, r1 = await cede.evaluate_context("ch", "msg_x", "tm_a")
-    # Second call — teammate already decided, should CEDE
     d2, r2 = await cede.evaluate_context("ch", "msg_x", "tm_a")
     assert d2 == CedeDecision.CEDE
 
 
-# ── 2. Event Wakeup Integration ──
+# ── 2. Event Wakeup (BRAIN_UPDATED) ──
 
 async def test_event_fires_subscribers():
-    """Firing a TASK_CREATED event should reach subscribers."""
+    """Firing an event should reach subscribers."""
     bus = EventWakeupBus()
     calls = []
 
     async def handler(payload: WakeupPayload):
         calls.append(payload.event_type)
 
-    bus.subscribe(WakeupEvent.TASK_CREATED, handler)
-    bus.fire(WakeupEvent.TASK_CREATED, WakeupPayload(
-        event_type=WakeupEvent.TASK_CREATED.value,
-        task_id="task_test",
+    bus.subscribe(WakeupEvent.BRAIN_UPDATED, handler)
+    bus.fire(WakeupEvent.BRAIN_UPDATED, WakeupPayload(
+        event_type=WakeupEvent.BRAIN_UPDATED.value,
+        teammate_id="tm_test",
     ))
 
     import asyncio
     await asyncio.sleep(0.05)
     assert len(calls) == 1
-    assert calls[0] == WakeupEvent.TASK_CREATED.value
+    assert calls[0] == WakeupEvent.BRAIN_UPDATED.value
 
 
-async def test_wakeup_event_has_handlers():
-    """Default handlers should be registered after get_event_wakeup_bus()."""
+async def test_wakeup_bus_empty_no_handlers():
+    """Default bus singleton has no subscribers (clean Phase 24)."""
     from backend.services.autonomous.event_wakeup import get_event_wakeup_bus
     bus = get_event_wakeup_bus()
-    # The singleton may already have handlers — just check TASK_CREATED has at least 1
-    assert bus.count_subscribers(WakeupEvent.TASK_CREATED) >= 1
-    assert bus.count_subscribers(WakeupEvent.MESSAGE_EVENT) >= 0  # MESSAGE_EVENT default handler is optional
+    assert bus.count_subscribers() == 0
 
 
 # ── 3. Teammate State Transitions ──
@@ -137,17 +134,13 @@ async def test_state_history():
     r3 = await mgr.set_idle(tm_id)
 
     st = await mgr.get(tm_id)
-    assert len(st.state_history) >= 2  # at least the last 2 transitions
+    assert len(st.state_history) >= 2
 
 
 # ── 4. Cede protocol anti-redundancy ──
 
 async def test_cede_relevant_teammates_respond():
-    """Multiple teammates → all relevant ones RESPOND, off-domain ones CEDE.
-
-    engineer + reviewer are both engineering-domain, so a refactor message
-    makes both respond. A designer (off-domain) would cede.
-    """
+    """Multiple teammates → all relevant ones RESPOND, off-domain ones CEDE."""
     cede = CedeProtocol()
     msg_id = "msg_dedup"
     engineer = {"id": "tm_e", "name": "Eng", "role": "engineer"}

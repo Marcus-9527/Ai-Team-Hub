@@ -16,7 +16,7 @@ export default function LandingPage({ onEnterApp, lang, changeLang }) {
       <Navbar onEnterApp={onEnterApp} lang={lang} changeLang={changeLang} />
 
       <main>
-        <HeroSection onScrollDown={handleScrollDown} />
+        <HeroSection onScrollDown={handleScrollDown} onEnterApp={onEnterApp} />
 
         <div id="features">
           <ProjectsSection />

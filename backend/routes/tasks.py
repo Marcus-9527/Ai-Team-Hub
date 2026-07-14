@@ -188,6 +188,7 @@ class TaskResponse(BaseModel):
     test_result: str = ""
     review_comments: str = ""
     review_rounds: int = 0
+    techlead_decision: Optional[dict] = None
 
 
 class TaskDetailResponse(TaskResponse):

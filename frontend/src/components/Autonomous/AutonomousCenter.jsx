@@ -24,21 +24,18 @@ const STATE_LABEL = {
 export default function AutonomousCenter() {
   const [states, setStates] = useState([]);
   const [proposals, setProposals] = useState([]);
-  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, prop, ev] = await Promise.all([
+      const [st, prop] = await Promise.all([
         api.listTeammateStates().catch(() => ({ states: [] })),
         api.listPendingProposals().catch(() => ({ proposals: [] })),
-        api.getWakeupEvents('', 12).catch(() => ({ events: [] })),
       ]);
       setStates(st.states || []);
       setProposals(prop.proposals || []);
-      setEvents(ev.events || []);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -159,27 +156,6 @@ export default function AutonomousCenter() {
           )}
         </section>
 
-        {/* Wakeup events */}
-        <section>
-          <h2 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--color-ink)' }}>
-            <Clock size={14} style={{ color: 'var(--color-primary)' }} /> 近期唤醒事件
-          </h2>
-          {events.length === 0 ? (
-            <p className="text-xs py-4" style={{ color: 'var(--color-ink-faint)' }}>暂无事件。任务完成/失败/提案更新会触发唤醒事件。</p>
-          ) : (
-            <div className="space-y-1">
-              {events.map((e, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
-                  style={{ background: 'rgba(0,0,0,0.02)', color: 'var(--color-ink-faint)' }}>
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--color-primary)' }} />
-                  <span className="font-medium" style={{ color: 'var(--color-ink)' }}>{e.event_type}</span>
-                  <span className="truncate flex-1">{e.reason || e.task_id || ''}</span>
-                  <span className="flex-shrink-0">{e.created_at ? new Date(e.created_at).toLocaleTimeString('zh-CN') : ''}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
       </div>
     </div>
   );

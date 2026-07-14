@@ -1,5 +1,5 @@
 """
-test_execution_persistence.py — v3.2 Execution Persistence Tests
+test_execution_persistence.py - v3.2 Execution Persistence Tests
 
 Tests:
   - restart: data survives engine close/reopen
@@ -7,6 +7,8 @@ Tests:
   - stats:   aggregate statistics correct
 """
 import asyncio
+import os
+import tempfile
 import time
 
 import pytest
@@ -18,64 +20,50 @@ from backend.services.runtime.execution_store import (
 )
 
 
+def _tmp_db_url():
+    """Return a temp-file SQLite URL (thread-safe, unlike :memory:)."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".test-exec.db", delete=False)
+    path = tmp.name
+    tmp.close()
+    return f"sqlite:///{path}", path
+
+
 # ── Test 1: Data survives restart ──
 
 
 @pytest.mark.asyncio
 async def test_data_survives_restart():
-    """
-    Create execution in DB store, close engine, reopen with new engine,
-    verify the record is still there.
-    """
-    # First store — uses in-memory SQLite
-    store = DBExecutionStore(db_url="sqlite:///:memory:")
-    engine1 = store._engine
-
-    rec = store.create(task_id="task-1", model="test/model")
-    rec.set_running()
-    time.sleep(0.01)
-    rec.set_completed(prompt_tokens=100, completion_tokens=50)
-
-    # Verify via the same store
-    fetched = await store.aget(rec.execution_id)
-    assert fetched is not None, "Should find execution after create+sync"
-    assert fetched.task_id == "task-1"
-    assert fetched.status == "COMPLETED"
-    assert fetched.total_tokens == 150
-    assert fetched.cost_micro_usd > 0
-    assert len(fetched.events) >= 2  # runtime_start + runtime_complete
-
-    # --- Simulate restart: new store with DIFFERENT engine (same memory DB path) ---
-    # Note: in-memory DB is per-engine, so for a true "restart" test we need
-    # a file-based DB.  But for the engine-restart pattern we can verify that
-    # a fresh DBExecutionStore reading from the same file works.
-    # Since in-memory is per-connection, here we just verify store1 data is durable.
-    # For a true restart test we'd use a temp file.
-    engine1.dispose()
-
-    # Verify data is still in engine2 (actually this is a new engine, so in-memory is empty)
-    # Instead, let's verify that the data was written correctly by reading from store1's
-    # old engine before dispose above.  Already done via fetched assertion.
-
-    # For a proper restart test, use a file-based SQLite:
-    import tempfile
-    import os
-
-    tmpf = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp_path = tmpf.name
-    tmpf.close()
-
+    """Create execution, close engine, reopen, verify record persists."""
+    url, path = _tmp_db_url()
     try:
-        store_a = DBExecutionStore(db_url=f"sqlite:///{tmp_path}")
+        store = DBExecutionStore(db_url=url)
+
+        rec = store.create(task_id="task-1", model="test/model")
+        rec.set_running()
+        time.sleep(0.01)
+        rec.set_completed(prompt_tokens=100, completion_tokens=50)
+
+        # Verify via the same store
+        fetched = await store.aget(rec.execution_id)
+        assert fetched is not None, "Should find execution after create+sync"
+        assert fetched.task_id == "task-1"
+        assert fetched.status == "COMPLETED"
+        assert fetched.total_tokens == 150
+        assert fetched.cost_micro_usd > 0
+        assert len(fetched.events) >= 2  # runtime_start + runtime_complete
+
+        engine1 = store._engine
+
+        # Simulate restart: new store with new engine on the same file
+        store_a = DBExecutionStore(db_url=url)
         rec_a = store_a.create(task_id="restart-test", model="m")
         rec_a.set_running()
         rec_a.set_completed(prompt_tokens=50, completion_tokens=25)
 
-        # Close engine
         store_a._engine.dispose()
+        engine1.dispose()
 
-        # Reopen with new engine
-        store_b = DBExecutionStore(db_url=f"sqlite:///{tmp_path}")
+        store_b = DBExecutionStore(db_url=url)
         fetched_b = await store_b.aget(rec_a.execution_id)
         assert fetched_b is not None, "Data should survive restart"
         assert fetched_b.execution_id == rec_a.execution_id
@@ -89,7 +77,10 @@ async def test_data_survives_restart():
 
         store_b._engine.dispose()
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 # ── Test 2: Event timeline ──

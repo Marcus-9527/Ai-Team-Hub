@@ -225,7 +225,7 @@ export default function HomePage({ onNavigate, triggerRefresh, refreshKey, lang 
             <input
               value={quickTitle}
               onChange={e => setQuickTitle(e.target.value)}
-              placeholder="输入任务标题..."
+              placeholder={t('task.title_ph')}
               className="w-full px-3 py-2 mt-3 rounded-xl border border-hairline text-sm text-ink bg-canvas focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               autoFocus
               onKeyDown={e => e.key === 'Enter' && createQuickTask()}

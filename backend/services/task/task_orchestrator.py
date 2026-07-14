@@ -91,8 +91,11 @@ class TaskOrchestrator:
                 "node_count": len(dag.nodes),
             })
 
+            # 1.5 TechLead review (Phase 25) — analysis, risk, teammate recs
+            await self._techlead_review(db, task, dag, goal)
+
             # 2. Assign teammates first (modifies dag.nodes in-memory)
-            await self._assign_and_save(db, task_id, dag)
+            await self._assign_and_save(db, task, dag)
             _sse_event("team_created", task_id, {
                 "team_count": len(dag.nodes),
             })
@@ -128,7 +131,17 @@ class TaskOrchestrator:
                 "error": getattr(task, "error", "")[:200],
             })
 
-            # 6. Closure: Engineer → TechLead → Reviewer → (Fix) auto-relay.
+            # 6a. Phase 27: emit replan events if TechLead adapted the plan
+            if getattr(task, "replan_decisions", None):
+                for i, rd in enumerate(task.replan_decisions):
+                    _sse_event("replan_decision", task_id, {
+                        "index": i,
+                        "step_id": rd.get("step_id", ""),
+                        "reasoning": rd.get("reasoning", ""),
+                        "total_replans": len(task.replan_decisions),
+                    })
+
+            # 6b. Closure: Engineer → TechLead → Reviewer → (Fix) auto-relay.
             # Only when the task actually ran an engineer step (has a workspace).
             if task.status == TaskStatus.COMPLETED:
                 try:
@@ -233,40 +246,94 @@ class TaskOrchestrator:
         await db.flush()
         logger.info("[ORCH] Persisted DAG %s (%d nodes)", dag.id[:8], len(dag.nodes))
 
-    async def _assign_and_save(self, db: AsyncSession, task_id: str, dag):
+    async def _assign_and_save(self, db: AsyncSession, task: TaskModel, dag):
         """Assign unassigned teammates and persist the plan.
 
+        Phase 24: TeammateSelector → TaskClaim lock → assignment.
+        Phase 26: TechLead recommendation override → selector support + validation.
         ponytail: every node MUST end up with a teammate — an unassigned
         step makes the executor fall back to task.api_key (always empty on
         create), which throws 'api_key is required' and the runtime event
         never gets set, so the task hangs at PLANNING forever.
         """
+        task_id = task.id
         # Lazy-load all teammates once, for the round-robin fallback.
         from sqlalchemy import select
         from backend.models import Teammate as _TM
         all_tm = (await db.execute(select(_TM))).scalars().all()
         tm_cycle = iter(all_tm) if all_tm else iter(())
 
-        for node in dag.nodes.values():
+        # Phase 24: claim manager for lock-based assignment
+        from backend.services.autonomous.task_claim import get_claim_manager
+        claim_mgr = get_claim_manager()
+
+        # Phase 26: parse TechLead teammate recommendations
+        # Format: [{"step": 1, "teammate": "name", "confidence": 0.85, ...}]
+        # Resolve all recommendations upfront: step (1-based) → (teammate_id, confidence)
+        tl_map: dict[int, tuple[str, float]] = {}
+        if task.techlead_decision:
+            for r in task.techlead_decision.get("teammate_recommendations", []):
+                step_idx = r.get("step")
+                if not step_idx or step_idx < 1 or step_idx > len(dag.nodes.values()):
+                    continue
+                tm = (await db.execute(
+                    select(_TM).where(_TM.name == r.get("teammate", ""))
+                )).scalar_one_or_none()
+                if tm:
+                    # Phase 26.5: offline guard — skip override so selector falls back
+                    from backend.services.autonomous.teammate_state import get_state_manager
+                    _st = await get_state_manager().get(tm.id)
+                    if _st and _st.state.value == "offline":
+                        logger.info("[ORCH] TL rec '%s' offline — fallback", tm.name)
+                        continue
+                    tl_map[step_idx] = (tm.id, r.get("confidence", 0.5))
+                else:
+                    logger.info("[ORCH] TL rec '%s' for step %d not found — fallback",
+                                r.get("teammate"), step_idx)
+
+        for i, node in enumerate(dag.nodes.values()):
             if node.selected_teammate_id or node.teammate:
                 continue
             try:
+                # Phase 26: check TechLead recommendation for this step
+                tl_rec_id = tl_map.get(i + 1)
+
+                kwargs: dict = {"top_n": 3, "db": db}
+                if tl_rec_id:
+                    kwargs["techlead_override"] = tl_rec_id
+
                 if node.required_skills:
                     profiles = await TeammateSelector.recommend_by_skills(
-                        node.required_skills, top_n=1, db=db,
+                        node.required_skills, **kwargs,
                     )
-                    if profiles:
-                        node.selected_teammate_id = profiles[0].id
-                        node.teammate = profiles[0].name
-                        continue
+                else:
+                    profiles = await TeammateSelector.recommend_by_skills([], **kwargs)
+
+                if profiles:
+                    # Phase 24: claim-based lock — first claimant wins
+                    for p in profiles:
+                        ok, _ = await claim_mgr.claim(
+                            task_id, p.id, p.name,
+                            f"auto-assign via selector",
+                        )
+                        if ok:
+                            node.selected_teammate_id = p.id
+                            node.teammate = p.name
+                            break
+                if node.selected_teammate_id:
+                    continue
+
                 # ponytail: no skill match (or no skills) → any teammate
                 nxt = next(tm_cycle, None)
                 if nxt is None and all_tm:
                     tm_cycle = iter(all_tm)
                     nxt = next(tm_cycle, None)
                 if nxt:
-                    node.selected_teammate_id = nxt.id
-                    node.teammate = nxt.name
+                    # Phase 24: round-robin fallback also goes through claim
+                    ok, _ = await claim_mgr.claim(task_id, nxt.id, nxt.name, "round-robin fallback")
+                    if ok:
+                        node.selected_teammate_id = nxt.id
+                        node.teammate = nxt.name
             except Exception:
                 pass
 
@@ -329,10 +396,83 @@ class TaskOrchestrator:
         await db.commit()
         return task
 
-    # ── Phase 8: TechLead synthesis relay ──
+    # ── Phase 25: TechLead review (post-plan, before assign) ──
+
+    async def _techlead_review(self, db: AsyncSession, task: TaskModel, dag, goal: str) -> None:
+        """Call TechLead to review the DAG plan: analysis, risk, teammate recs.
+
+        Saves structured decision to task.techlead_decision (JSON).
+        Non-blocking: failures are logged, not fatal.
+        """
+        tl = await self._pick_teammate(db, "techlead")
+        if tl is None:
+            logger.info("[ORCH] No techlead teammate — skipping review for %s", task.id[:8])
+            return
+
+        # Build prompt with DAG context
+        nodes_text = "\n".join(
+            f"{i+1}. {n.description}" for i, n in enumerate(dag.nodes.values())
+        )
+
+        # Load available teammates for recommendation context
+        from sqlalchemy import select
+        from backend.models import Teammate
+        tm_rows = (await db.execute(select(Teammate))).scalars().all()
+        teammates_text = "\n".join(
+            f"  {t.name} (role={t.role}, id={t.id[:8]})" for t in tm_rows
+        )
+
+        prompt = (
+            f"You are TechLead reviewing a task plan.\n\n"
+            f"## Task Goal\n{goal}\n\n"
+            f"## Planned Steps\n{nodes_text}\n\n"
+            f"## Available Teammates\n{teammates_text}\n\n"
+            f"Respond ONLY with valid JSON. No markdown, no code fences:\n"
+            f"{{\n"
+            f'  "analysis": "brief task analysis",\n'
+            f'  "confidence": 0.85,\n'
+            f'  "risk_level": "LOW",\n'
+            f'  "risk_factors": ["list", "risk", "factors"],\n'
+            f'  "teammate_recommendations": [\n'
+            f'    {{"step": 1, "teammate": "name", "confidence": 0.85, "reasoning": "why"}}\n'
+            f'  ],\n'
+            f'  "overall_reasoning": "summary of selection reasoning"\n'
+            f"}}"
+        )
+
+        executor = TaskExecutor(runtime=self._runtime)
+        try:
+            rt = await executor.execute_direct(
+                db, task=task,
+                description=prompt,
+                intent=f"techlead_review:{task.id}",
+                teammate_id=tl.id,
+                workspace_id=task.workspace_id or "",
+                timeout=60.0,
+            )
+            if rt and rt.result:
+                decision = json.loads(rt.result)
+                if isinstance(decision, dict):
+                    task.techlead_decision = decision
+                    _sse_event("techlead_review", task.id, decision)
+                    logger.info("[ORCH] TechLead review saved for %s", task.id[:8])
+                    # Phase 26: HIGH risk → auto-require reviewer via policy
+                    if decision.get("risk_level") == "HIGH":
+                        try:
+                            from backend.services.task.task_policy import TaskPolicyService
+                            await TaskPolicyService().upsert_policy(
+                                db, task.id, approval_required="1",
+                            )
+                            logger.info("[ORCH] TechLead HIGH risk → policy approval_required for %s", task.id[:8])
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.warning("[ORCH] TechLead review failed for %s: %s", task.id[:8], e)
+
+    # ── Phase 25: TechLead synthesis relay (post-execution) ──
 
     async def _techlead_relay(self, db: AsyncSession, task: TaskModel) -> None:
-        """After execution, if a TechLead teammate exists, synthesize step results."""
+        """After execution: write Brain fragment + task summary + SSE event."""
         ws_id = task.workspace_id or ""
         if not ws_id:
             return
@@ -340,7 +480,6 @@ class TaskOrchestrator:
         if tl is None:
             logger.info("[ORCH] No techlead teammate — skipping synthesis for %s", task.id[:8])
             return
-        # Collect step outputs
         steps = (await self._manager.state.list_steps(db, task.id)) if hasattr(self._manager, 'state') else []
         if not steps:
             return
@@ -348,10 +487,34 @@ class TaskOrchestrator:
                    for s in steps if s.output]
         if not outputs:
             return
-        # Fire-and-forget synthesis memory
-        synthesis_text = json.dumps({"task": task.title, "steps": outputs}, ensure_ascii=False)[:2000]
-        asyncio.ensure_future(self._store_review_memory(
-            tl.id, task, "synthesis", synthesis_text, round_no=0))
+
+        synthesis = {"title": task.title, "status": task.status, "steps": outputs}
+        synthesis_json = json.dumps(synthesis, ensure_ascii=False)
+
+        # 1) Write Brain fragment (DECISIONS) — TechLead's persistent self-knowledge
+        try:
+            from backend.services.brain.fragment_store import get_brain_fragment_store, BrainFragment, BrainFragmentType
+            frag = BrainFragment(
+                teammate_id=tl.id,
+                fragment_type=BrainFragmentType.DECISIONS,
+                content=f"Task synthesis [{task.id[:8]}]: {synthesis_json[:2000]}",
+                source="techlead_relay",
+            )
+            asyncio.ensure_future(get_brain_fragment_store().store(frag))
+        except Exception:
+            pass
+
+        # 2) Write human-readable summary on the task itself
+        try:
+            lines = []
+            for s in outputs:
+                preview = (s["output"] or "")[:200].replace("\n", " ")
+                lines.append(f"Step {s['order']} ({s['teammate_id'][:8]}): {preview}")
+            task.techlead_summary = "\n".join(lines)[:5000]
+        except Exception:
+            task.techlead_summary = synthesis_json[:2000]
+
+        # 3) SSE event
         _sse_event("techlead_synthesis", task.id, {"step_count": len(outputs)})
 
     # ── Closure: Engineer → Reviewer → Fix relay ──
@@ -566,4 +729,3 @@ def db_session_factory():
     """Lazy import to avoid circular import at module load."""
     from backend.database import async_session
     return async_session
-

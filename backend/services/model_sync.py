@@ -140,31 +140,25 @@ def _normalize_model_id(mid: str) -> str:
     return mid.replace("/", "-")
 
 
-def _load_configured_apikeys() -> dict[str, str]:
-    """Load API keys from DB, grouped by provider. Returns {provider: api_key}."""
+async def _load_configured_apikeys() -> dict[str, str]:
+    """Load API keys from DB via async session, grouped by provider. Returns {provider: api_key}."""
     try:
-        import sqlite3
-        # Use the same DB path as database.py
-        db_path = os.environ.get(
-            "AI_TEAM_HUB_DB",
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "aiteamhub.db"),
-        )
-        if not os.path.exists(db_path):
-            return {}
-        conn = sqlite3.connect(db_path)
-        cur = conn.execute("SELECT provider, api_key FROM apikeys")
-        rows = cur.fetchall()
-        conn.close()
-
+        from sqlalchemy import select
+        from backend.database import async_session
+        from backend.models import APIKey
+        async with async_session() as db:
+            rows = (await db.execute(select(APIKey))).scalars().all()
         from backend.crypto import decrypt_value
         result = {}
-        for provider, encrypted in rows:
-            plain = decrypt_value(encrypted)
+        for key in rows:
+            if not key.api_key:
+                continue
+            plain = decrypt_value(key.api_key)
             if plain:
-                result[provider] = plain
+                result[key.provider] = plain
         return result
     except Exception as e:
-        logger.debug("Could not load API keys for direct fetch: %s", e)
+        logger.debug("Could not load API keys: %s", e)
         return {}
 
 
@@ -244,7 +238,7 @@ def _get_static_fallback() -> dict[str, list[dict]]:
 async def sync_models() -> dict[str, list[dict]]:
     all_models = {}
 
-    api_keys = _load_configured_apikeys()
+    api_keys = await _load_configured_apikeys()
     logger.info("Loaded %d API keys for direct provider fetch", len(api_keys))
 
     async with httpx.AsyncClient(timeout=30) as client:

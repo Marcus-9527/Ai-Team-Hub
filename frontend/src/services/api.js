@@ -36,6 +36,9 @@ async function request(url, options = {}) {
   return res.json();
 }
 
+// ── Health ──
+export const healthCheck = () => request('/api/health');
+
 // ── Channels ──
 export const listChannels = () => request('/api/channels');
 export const createChannel = (data) => request('/api/channels', { method: 'POST', body: JSON.stringify(data) });
@@ -162,25 +165,6 @@ export const cedeDecide = (teammateId, teammateName, message, channelId = '', me
     method: 'POST',
     body: JSON.stringify({ teammate_id: teammateId, teammate_name: teammateName, message, channel_id: channelId, message_id: messageId }),
   });
-export const getCedeDecisions = (messageId) =>
-  request(`/api/autonomous/cede/decisions/${messageId}`);
-
-// Task Claim
-export const claimTask = (taskId, teammateId, teammateName = '', reason = '') =>
-  request('/api/autonomous/claim', {
-    method: 'POST',
-    body: JSON.stringify({ task_id: taskId, teammate_id: teammateId, teammate_name: teammateName, reason }),
-  });
-export const getTaskClaims = (taskId) => request(`/api/autonomous/claim/${taskId}`);
-
-// Event Wakeup
-export const fireWakeupEvent = (eventType, taskId = '', teammateId = '', reason = '') =>
-  request('/api/autonomous/event', {
-    method: 'POST',
-    body: JSON.stringify({ event_type: eventType, task_id: taskId, teammate_id: teammateId, reason }),
-  });
-export const getWakeupEvents = (eventType = '', limit = 20) =>
-  request(`/api/autonomous/events?${eventType ? `event_type=${eventType}&` : ''}limit=${limit}`);
 
 // Brain Proposals
 export const listProposals = (status = '', teammateId = '', limit = 50) => {
@@ -192,13 +176,6 @@ export const listProposals = (status = '', teammateId = '', limit = 50) => {
 };
 export const listPendingProposals = () =>
   request('/api/autonomous/proposals/pending');
-export const getProposal = (proposalId) =>
-  request(`/api/autonomous/proposals/${proposalId}`);
-export const createProposal = (teammateId, targetType, targetLabel, proposedContent, originalContent = '', taskId = '', reason = '') =>
-  request('/api/autonomous/proposals', {
-    method: 'POST',
-    body: JSON.stringify({ teammate_id: teammateId, target_type: targetType, target_label: targetLabel, proposed_content: proposedContent, original_content: originalContent, task_id: taskId, reason }),
-  });
 export const approveProposal = (proposalId, resolvedBy = 'user') =>
   request('/api/autonomous/proposals/approve', {
     method: 'POST',

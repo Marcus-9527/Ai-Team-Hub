@@ -60,6 +60,30 @@ class Teammate(Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "role": self.role,
+            "avatar_emoji": self.avatar_emoji,
+            "system_prompt": self.system_prompt,
+            "model_provider": self.model_provider,
+            "model_name": self.model_name,
+            "api_key_ref": self.api_key_ref,
+            "skills": self.skills or [],
+            "capabilities": self.capabilities or [],
+            "success_rate": self.success_rate or 0.0,
+            "average_score": self.average_score or 0.0,
+            "execution_count": self.execution_count or 0,
+            "strengths": self.strengths or [],
+            "weaknesses": self.weaknesses or [],
+            "learned_patterns": self.learned_patterns or [],
+            "failed_patterns": self.failed_patterns or [],
+            "preferred_tools": self.preferred_tools or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 
 class APIKey(Base):
     __tablename__ = "apikeys"
@@ -260,6 +284,14 @@ class TaskModel(Base):
     review_comments = Column(Text, default="")
     review_rounds = Column(Integer, default=0)
 
+    # ── Phase 25: TechLead decision & synthesis ──
+    techlead_decision = Column(JSON, nullable=True)   # review output: analysis, risk, recs
+    techlead_summary = Column(Text, default="")       # human-readable post-exec synthesis
+
+    # ── Phase 27: TechLead replan tracking ──
+    replan_decisions = Column(JSON, default=list)     # list of replan records
+    replan_count = Column(Integer, default=0)         # how many replans happened
+
     # ── DAG hierarchy: parent_task / child_task / dependency ──
     parent_task_id = Column(String, ForeignKey("tasks.id"), nullable=True, index=True)
     child_task_ids = Column(JSON, default=list)
@@ -302,6 +334,10 @@ class TaskModel(Base):
             "test_result": self.test_result or "",
             "review_comments": self.review_comments or "",
             "review_rounds": self.review_rounds or 0,
+            "techlead_decision": self.techlead_decision,
+            "techlead_summary": self.techlead_summary or "",
+            "replan_decisions": self.replan_decisions or [],
+            "replan_count": self.replan_count or 0,
             "parent_task_id": self.parent_task_id,
             "child_task_ids": self.child_task_ids or [],
             "dependency": self.dependency or [],

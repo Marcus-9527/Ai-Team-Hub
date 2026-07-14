@@ -32,6 +32,9 @@ def _get_fernet() -> Fernet:
     if _fernet is not None:
         return _fernet
 
+    # Production enforcement: if AI_TEAM_HUB_CRYPTO_KEY_REQUIRED is set
+    # we refuse to fall back to file-based or auto-generated key.
+    enforce = os.environ.get("AI_TEAM_HUB_CRYPTO_KEY_REQUIRED", "").lower() in ("1", "true", "yes")
     key = os.environ.get(ENCRYPTION_KEY_ENV)
     if key:
         try:
@@ -42,6 +45,13 @@ def _get_fernet() -> Fernet:
                 "%s is not a valid Fernet key (%s), falling back to file-based key",
                 ENCRYPTION_KEY_ENV, e,
             )
+
+    if enforce:
+        raise RuntimeError(
+            f"{ENCRYPTION_KEY_ENV} is required via env var "
+            f"(AI_TEAM_HUB_CRYPTO_KEY_REQUIRED=1). "
+            f"Set a valid Fernet key to continue."
+        )
 
     if os.path.exists(_KEY_FILE):
         with open(_KEY_FILE, "rb") as f:

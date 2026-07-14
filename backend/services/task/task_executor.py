@@ -44,6 +44,7 @@ from backend.services.task.task_policy import TaskPolicyService
 from backend.services.runtime.retry_policy import (
     RetryPolicy,
     BackoffStrategy,
+    FailureType,
 )
 from backend.services.runtime.trace import TraceLogger
 from backend.services.runtime.executor import ExecutionRuntime, ExecStatus as RuntimeExecStatus
@@ -412,6 +413,12 @@ class TaskExecutor:
                     step_id=step.id, step_order=step.order, attempt=attempt,
                     error=error_msg, will_retry=True,
                 )
+                # ── Phase 27.5: Early replan for tool failures ──
+                if failure_type == FailureType.SYSTEM_FAIL and attempt == 1:
+                    replan = await self._trigger_replan(db, task, step, error_msg)
+                    handled = await self._apply_replan(db, task, step, replan, trace, events, error_msg)
+                    if handled:
+                        return
                 logger.warning(
                     f"[EXECUTOR] Step {step_id_short} attempt {attempt} FAILED "
                     f"({failure_type.value}). Retrying in {decision.delay_ms}ms..."
@@ -429,6 +436,11 @@ class TaskExecutor:
                 step_id=step.id, step_order=step.order, attempt=attempt,
                 error=error_msg, will_retry=False,
             )
+            # ── Phase 27: TechLead replan before abort ──
+            replan = await self._trigger_replan(db, task, step, error_msg)
+            if await self._apply_replan(db, task, step, replan, trace, events, error_msg):
+                return
+
             logger.error(f"[EXECUTOR] Step {step_id_short} ABORTED: {error_msg}")
             raise RuntimeError(f"Step {step.id} failed (action={decision.action}): {error_msg}")
 
@@ -481,6 +493,156 @@ class TaskExecutor:
                 # reviewer output keyed differently
                 task.review_comments = str(data.get("summary", ""))
         await db.flush()
+
+    # ── Phase 27.5: Unified replan applicator + Brain fragment writer ──
+
+    async def _apply_replan(
+        self, db: AsyncSession, task: TaskModel, step: TaskStepModel,
+        replan: dict | None, trace: TraceLogger, events: TaskEventLogger,
+        error_msg: str,
+    ) -> bool:
+        """Apply a TechLead replan decision. Returns True if the step is resolved."""
+        if not replan:
+            return False
+        action = replan.get("action", "")
+        if action not in ("retry", "skip", "reassign"):
+            return False
+
+        step_id_short = step.id[:8]
+        logger.warning(f"[EXECUTOR] Step {step_id_short} — TechLead replan: {action}")
+
+        # Record decision
+        task.replan_decisions = (task.replan_decisions or []) + [{
+            "step_id": step.id,
+            "error": error_msg[:500],
+            "decision": {k: v for k, v in replan.items() if k != "reasoning"},
+            "reasoning": replan.get("reasoning", ""),
+        }]
+        task.replan_count = (task.replan_count or 0) + 1
+
+        if replan.get("new_objective"):
+            step.objective = replan["new_objective"][:500]
+        if replan.get("reassign"):
+            step.teammate_id = replan["reassign"]
+
+        await db.flush()
+
+        # ── Skip: mark step SKIPPED, treat as resolved ──
+        if action == "skip":
+            step = await self.state.transition_step_status(db, step, TaskStepStatus.SKIPPED)
+            events.log_step_completed(
+                step_id=step.id, step_order=step.order, attempt=1,
+                duration_ms=0, output_length=0,
+            )
+            # ponytail: skip counts as success — downstream deps resolve
+            asyncio.ensure_future(self._store_replan_brain(task, replan, action, error_msg))
+            return True
+
+        # ── Reassign: teammate change + re-execute ──
+        if action == "reassign":
+            # Fall through to retry path below — reassign is "retry with new teammate"
+            pass
+
+        # ── Retry: re-submit with revised plan ──
+        step.status = TaskStepStatus.PENDING
+        await db.flush()
+        context = await self.context_builder.build_maeos_description(db, task, step)
+        new_rtid = await self._runtime.submit(
+            description=context,
+            priority=task.priority,
+            intent=f"task_step:{task.id}",
+            teammate=step.teammate_id or "",
+            workspace_id=task.workspace_id or "",
+            wait=False,
+        )
+        new_rt = await self._runtime.wait(new_rtid, timeout=300.0)
+        if new_rt and new_rt.status == RuntimeExecStatus.COMPLETED:
+            step = await self.result_handler.handle_step_success(
+                db, step, new_rt.result or "", new_rtid, 0,
+            )
+            await self._persist_closure(db, task, new_rt)
+            logger.info(f"[EXECUTOR] Step {step_id_short} COMPLETED after TechLead replan")
+            asyncio.ensure_future(self._store_replan_brain(task, replan, action, error_msg))
+            return True
+        error_msg = new_rt.error if new_rt else "Replan execution failed"
+        logger.warning(f"[EXECUTOR] Step {step_id_short} failed after replan: {error_msg}")
+        return False
+
+    async def _store_replan_brain(self, task: TaskModel, replan: dict, action: str, error_msg: str) -> None:
+        """Write replan decision as BrainFragment DECISIONS (fire-and-forget)."""
+        try:
+            from backend.services.brain.fragment_store import get_brain_fragment_store, BrainFragment, BrainFragmentType
+            frag = BrainFragment(
+                teammate_id=task.created_by or "",
+                fragment_type=BrainFragmentType.DECISIONS,
+                content=json.dumps({
+                    "event": "replan",
+                    "task_id": task.id,
+                    "step_id": replan.get("step_id", ""),
+                    "action": action,
+                    "failure_reason": error_msg[:500],
+                    "adaptation": {k: v for k, v in replan.items() if k != "reasoning"},
+                    "result": "applied" if action != "abort" else "aborted",
+                }, ensure_ascii=False),
+                source="techlead_replan",
+                confidence=0.8,
+            )
+            await get_brain_fragment_store().store(frag)
+        except Exception as e:
+            logger.debug("[EXECUTOR] replan brain fragment skipped: %s", e)
+
+    # ── Phase 27: TechLead replan helpers ──
+
+    async def _find_techlead(self, db: AsyncSession):
+        """Find the TechLead teammate by role."""
+        from sqlalchemy import select
+        from backend.models import Teammate
+        row = (await db.execute(
+            select(Teammate).where(Teammate.role == "techlead")
+        )).scalar_one_or_none()
+        return row
+
+    async def _trigger_replan(self, db: AsyncSession, task: TaskModel,
+                               step: TaskStepModel, error_msg: str) -> dict | None:
+        """Call TechLead for a replan decision. Returns dict or None."""
+        tl = await self._find_techlead(db)
+        if not tl:
+            return None
+
+        from sqlalchemy import select as _s
+        from backend.models import Teammate as _TM
+        tm_rows = (await db.execute(_s(_TM))).scalars().all()
+        tms = "\n".join(f"  {t.name} (role={t.role}, id={t.id[:8]})" for t in tm_rows) if tm_rows else "none"
+
+        prompt = (
+            f"A step failed. Replan, skip, reassign, or abort.\n\n"
+            f"## Task\n{task.title}\n\n"
+            f"## Failed Step\n{step.objective}\n\n"
+            f"## Error\n{error_msg[:500]}\n\n"
+            f"## Available Teammates\n{tms}\n\n"
+            f"Respond ONLY with valid JSON, no markdown:\n"
+            f'{{"action":"retry","new_objective":"revised step","reassign":"teammate_id","reasoning":"why"}}\n'
+            f'{{"action":"skip","reasoning":"step is unnecessary"}}\n'
+            f'{{"action":"reassign","reassign":"teammate_id","reasoning":"better teammate for this"}}\n'
+            f'Or {{"action":"abort","reasoning":"cannot recover"}}'
+        )
+
+        try:
+            rt = await self.execute_direct(
+                db, task=task,
+                description=prompt,
+                intent=f"techlead_replan:{task.id}",
+                teammate_id=tl.id,
+                workspace_id=task.workspace_id or "",
+                timeout=60.0,
+            )
+            if rt and rt.result:
+                decision = json.loads(rt.result)
+                if isinstance(decision, dict) and decision.get("action"):
+                    return decision
+        except Exception:
+            pass
+        return None
 
     async def execute_direct(
         self,

@@ -390,6 +390,77 @@ export default function TaskDetailView({ taskId, onBack }) {
         </div>
       )}
 
+      {/* ═══ Phase 26.5: TechLead Decision Card ═══ */}
+      {task.techlead_decision && (
+        <div className="mt-4 bg-white rounded-xl border border-hairline p-5">
+          <h3 className="text-sm font-bold text-ink mb-3 flex items-center gap-2">
+            <BrainCircuit size={15} className="text-ink-faint" />
+            {'🧠'} TechLead Decision
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs mb-3">
+            <div>
+              <span className="text-ink-faint block mb-1">{'Risk'}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                task.techlead_decision.risk_level === 'HIGH' ? 'bg-red-100 text-red-600' :
+                task.techlead_decision.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-600' :
+                'bg-green-100 text-green-600'
+              }`}>
+                {task.techlead_decision.risk_level || 'N/A'}
+              </span>
+            </div>
+            <div>
+              <span className="text-ink-faint block mb-1">{'Confidence'}</span>
+              <span className="font-semibold text-ink">{((task.techlead_decision.confidence || 0) * 100).toFixed(0)}%</span>
+            </div>
+            <div>
+              <span className="text-ink-faint block mb-1">{'Plan Steps'}</span>
+              <span className="font-semibold text-ink">{(task.techlead_decision.teammate_recommendations || []).length} steps</span>
+            </div>
+          </div>
+
+          {/* Analysis */}
+          {task.techlead_decision.analysis && (
+            <div className="mb-3 p-3 rounded-lg bg-gray-50 border border-hairline">
+              <p className="text-xs text-ink-mute leading-relaxed">{task.techlead_decision.analysis}</p>
+            </div>
+          )}
+
+          {/* Assignments */}
+          {(task.techlead_decision.teammate_recommendations || []).length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[11px] font-semibold text-ink-faint block">{'Assignments'}</span>
+              {task.techlead_decision.teammate_recommendations.map((rec, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-gray-50 border border-hairline">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-ink-faint w-4">#{rec.step}</span>
+                    <span className="text-xs font-semibold text-ink">{'→'} {rec.teammate || '?'}</span>
+                    {rec.reasoning && <span className="text-[11px] text-ink-faint">— {rec.reasoning}</span>}
+                  </div>
+                  {rec.confidence && (
+                    <span className="text-[11px] text-ink-faint font-mono">{((rec.confidence || 0) * 100).toFixed(0)}%</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Risk factors */}
+          {(task.techlead_decision.risk_factors || []).length > 0 && (
+            <div className="mt-3 pt-3 border-t border-hairline">
+              <span className="text-[11px] font-semibold text-ink-faint block mb-1">{'Risk Factors'}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {(task.techlead_decision.risk_factors || []).map((rf, i) => (
+                  <span key={i} className="text-[11px] bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-100">
+                    {'⚠'} {rf}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Analytics Summary */}
       <div className="mt-4">
         <TaskAnalytics taskId={taskId} />

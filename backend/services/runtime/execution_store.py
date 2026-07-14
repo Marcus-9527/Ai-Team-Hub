@@ -444,10 +444,16 @@ class DBExecutionStore:
         For tests, pass "sqlite:///:memory:".
         """
         self._db_url = db_url or self._resolve_db_url()
+        connect_args = {"check_same_thread": False} if "sqlite" in self._db_url else {}
+        poolclass = None
+        if "sqlite" in self._db_url and ":memory:" in self._db_url:
+            from sqlalchemy.pool import StaticPool
+            poolclass = StaticPool  # :memory: is per-connection; StaticPool keeps one connection
         self._engine = create_engine(
             self._db_url,
             echo=False,
-            connect_args={"check_same_thread": False} if "sqlite" in self._db_url else {},
+            connect_args=connect_args,
+            poolclass=poolclass,
         )
         # Create tables if they don't exist
         from backend.models import ExecutionRecordModel, ExecutionEventModel  # noqa: F401
@@ -458,10 +464,13 @@ class DBExecutionStore:
 
     @staticmethod
     def _resolve_db_url() -> str:
-        """Build sync SQLite URL from the configured DB path."""
-        from backend.database import DB_PATH
-        # WAL mode + timeout for concurrent access with async session
-        return f"sqlite:///{DB_PATH}?journal_mode=WAL&timeout=10000"
+        """Build sync DB URL from configuration."""
+        from backend.database import get_sync_db_url
+        url = get_sync_db_url()
+        # Only append SQLite query args when using SQLite
+        if "sqlite" in url:
+            url += "?journal_mode=WAL&timeout=10000"
+        return url
 
     # ── Public API ──
 
@@ -486,77 +495,70 @@ class DBExecutionStore:
         )
         rec._sync_callback = self._do_sync
 
-        # Insert row immediately — run the sync DB write in a worker thread
-        # so it can NEVER block the asyncio event loop (a locked SQLite
-        # write would otherwise freeze health/SSE/task-status for seconds).
+        # Insert row immediately (single-row INSERT is fast, no need to thread)
         def _insert():
-            with SyncSession(self._engine) as session:
-                session.add(ExecutionRecordModel(
-                    execution_id=rec.execution_id,
-                    task_id=rec.task_id,
-                    teammate=rec.teammate,
-                    model=rec.model,
-                    dag_id=rec.dag_id,
-                    dag_node_id=rec.dag_node_id,
-                    status=rec.status,
-                    start_time=rec.start_time,
-                    end_time=rec.end_time,
-                    duration_ms=rec.duration_ms,
-                    prompt_tokens=rec.prompt_tokens,
-                    completion_tokens=rec.completion_tokens,
-                    total_tokens=rec.total_tokens,
-                    cost_micro_usd=rec.cost_micro_usd,
-                    error=rec.error,
-                ))
-                session.commit()
+            try:
+                with SyncSession(self._engine) as session:
+                    session.add(ExecutionRecordModel(
+                        execution_id=rec.execution_id,
+                        task_id=rec.task_id,
+                        teammate=rec.teammate,
+                        model=rec.model,
+                        dag_id=rec.dag_id,
+                        dag_node_id=rec.dag_node_id,
+                        status=rec.status,
+                        start_time=rec.start_time,
+                        end_time=rec.end_time,
+                        duration_ms=rec.duration_ms,
+                        prompt_tokens=rec.prompt_tokens,
+                        completion_tokens=rec.completion_tokens,
+                        total_tokens=rec.total_tokens,
+                        cost_micro_usd=rec.cost_micro_usd,
+                        error=rec.error,
+                    ))
+                    session.commit()
+            except Exception as e:
+                logger.warning("[DBStore] create insert failed: %s", e)
 
-        asyncio.get_event_loop().run_in_executor(None, _insert)
+        _insert()
         return rec
 
     # noinspection PyMethodMayBeStatic
     def _do_sync(self, rec: ExecutionRecord) -> None:
-        """Sync ExecutionRecord state to DB — offloaded to a thread so it
-        never blocks the asyncio event loop (locked SQLite writes would
-        otherwise freeze health/SSE/task-status for seconds)."""
+        """Sync ExecutionRecord state to DB — runs inline (single-row UPDATE is fast)."""
         from backend.models import ExecutionRecordModel, ExecutionEventModel
 
-        def _work():
-            try:
-                with SyncSession(self._engine) as session:
-                    row = session.get(ExecutionRecordModel, rec.execution_id)
-                    if row is None:
-                        return
-                    row.task_id = rec.task_id
-                    row.teammate = rec.teammate
-                    row.model = rec.model
-                    row.status = rec.status
-                    row.start_time = rec.start_time
-                    row.end_time = rec.end_time
-                    row.duration_ms = rec.duration_ms
-                    row.prompt_tokens = rec.prompt_tokens
-                    row.completion_tokens = rec.completion_tokens
-                    row.total_tokens = rec.total_tokens
-                    row.cost_micro_usd = rec.cost_micro_usd
-                    row.error = rec.error
+        try:
+            with SyncSession(self._engine) as session:
+                row = session.get(ExecutionRecordModel, rec.execution_id)
+                if row is None:
+                    return
+                row.task_id = rec.task_id
+                row.teammate = rec.teammate
+                row.model = rec.model
+                row.status = rec.status
+                row.start_time = rec.start_time
+                row.end_time = rec.end_time
+                row.duration_ms = rec.duration_ms
+                row.prompt_tokens = rec.prompt_tokens
+                row.completion_tokens = rec.completion_tokens
+                row.total_tokens = rec.total_tokens
+                row.cost_micro_usd = rec.cost_micro_usd
+                row.error = rec.error
 
-                    # Sync events: delete existing, re-insert
-                    session.execute(
-                        delete(ExecutionEventModel).where(
-                            ExecutionEventModel.execution_id == rec.execution_id
-                        )
-                    )
-                    for evt in rec.events:
-                        session.add(ExecutionEventModel(
+                # Sync events
+                existing = {e.event_type: e for e in row.events}
+                for evt in rec.events:
+                    if evt["type"] not in existing:
+                        row.events.append(ExecutionEventModel(
                             execution_id=rec.execution_id,
                             event_type=evt["type"],
                             timestamp=evt.get("timestamp", time.time()),
                             payload=evt.get("data", {}),
                         ))
-                    session.commit()
-            except Exception as e:
-                logger.warning("[DBStore] _do_sync failed: %s", e)
-
-        try:
+                session.commit()
+        except Exception as e:
+            logger.warning("[DBStore] _do_sync failed: %s", e)
             asyncio.get_running_loop().run_in_executor(None, _work)
         except RuntimeError:
             _work()  # no running loop (e.g. sync test) — run inline

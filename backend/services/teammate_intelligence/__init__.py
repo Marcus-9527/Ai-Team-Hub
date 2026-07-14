@@ -317,10 +317,17 @@ class TeammateSelector:
         top_n: int = 1,
         db: Optional[AsyncSession] = None,
         exclude_teammate_names: Optional[set[str]] = None,
+        techlead_override: Optional[tuple[str, float]] = None,
     ) -> list[TeammateProfile]:
         """Score teammates by skill_match(0.4) + experience(0.3) + semantic_memory(0.2) + availability(0.1).
 
-        exclude_teammate_names: skip already-assigned teammates (DAG duplicate prevention).
+        Phase 24: availability score uses real TeammateRuntimeState.
+        OFFLINE → excluded (score 0). WORKING → 0.2. ACTIVE/IDLE → 1.0.
+
+        Phase 26: techlead_override = (teammate_id, confidence) from TechLead decision.
+        Boosts the recommended teammate's score by confidence * (1 - final) * 0.5
+        so high-confidence recommendations meaningfully influence selection.
+        Invalid recommendations (teammate not in pool) are silently ignored.
         """
         async def _do(session: AsyncSession) -> list[TeammateProfile]:
             q = select(Teammate)
@@ -337,22 +344,40 @@ class TeammateSelector:
             q = q.order_by(Teammate.created_at)
             result = await session.execute(q)
             teammates = list(result.scalars().all())
+            if not teammates:
+                return []
+
+            # Phase 24: load runtime state map once
+            try:
+                from backend.services.autonomous.teammate_state import get_state_manager
+                all_states = await get_state_manager().list_all()
+                state_map = {s["teammate_id"]: s["state"] for s in all_states}
+            except Exception:
+                state_map = {}
 
             scored: list[tuple[float, TeammateProfile]] = []
             for t in teammates:
+                state = state_map.get(t.id, "active")
+                # ponytail: OFFLINE = hard block, not just low score
+                if state == "offline":
+                    continue
                 profile = TeammateProfile.from_orm(t)
                 skill_score = TeammateSelector._compute_match(
                     profile.skills, required_skills
                 )
                 exp_score = profile.average_score
                 mem_score = TeammateSelector._memory_score(profile)
-                avail_score = max(0.1, 1.0 - (profile.execution_count / 200))
+                avail_score = 1.0 if state in ("active", "idle") else 0.2
                 final = (
                     skill_score * TeammateSelector.W_SKILL
                     + exp_score * TeammateSelector.W_EXPERIENCE
                     + mem_score * TeammateSelector.W_MEMORY
                     + avail_score * TeammateSelector.W_AVAILABILITY
                 )
+                # Phase 26: TechLead override — boost recommended teammate's score
+                if techlead_override and t.id == techlead_override[0]:
+                    bonus = techlead_override[1] * (1 - final) * 0.5
+                    final += bonus
                 scored.append((final, profile))
 
             scored.sort(key=lambda x: x[0], reverse=True)

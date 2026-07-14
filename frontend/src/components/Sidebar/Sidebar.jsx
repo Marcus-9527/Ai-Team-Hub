@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, Brain, FileCheck, Zap } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, Brain, FileCheck, Zap, Activity } from 'lucide-react';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
 import CreateChannelModal from '../Channel/CreateChannelModal';
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { view: 'brain', icon: Brain,         key: 'nav.brain' },
   { view: 'proposals', icon: FileCheck, key: 'nav.proposals' },
   { view: 'autonomous', icon: Zap,      key: 'nav.autonomous' },
+  { view: 'system-health', icon: Activity, key: 'nav.system_health' },
 ];
 
 export default function Sidebar({

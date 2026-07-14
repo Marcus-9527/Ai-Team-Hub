@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from '../../i18n';
 
-export default function HeroSection({ onScrollDown }) {
+export default function HeroSection({ onScrollDown, onEnterApp }) {
   const t = useTranslation();
   const [ready, setReady] = useState(false);
 
@@ -54,9 +54,9 @@ export default function HeroSection({ onScrollDown }) {
           {t('landing.hero.subtitle')}
         </p>
 
-        {/* CTA */}
+          {/* CTA */}
         <div style={{ marginTop: '36px', display: 'flex', alignItems: 'center', gap: '28px', opacity: ready ? 1 : 0, transform: ready ? 'translateY(0)' : 'translateY(16px)', transition: `all 1.2s ${ease} 1.3s` }}>
-          <button onClick={handleScroll}
+          <button onClick={onEnterApp}
             style={{ background: '#fc1c46', color: '#000', border: 'none', padding: '13px 30px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.1em', transition: 'background 0.3s ease' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = '#e0163a'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = '#fc1c46'; }}>

@@ -21,6 +21,7 @@ const ApprovalQueuePage = lazy(() => import('./components/Approval/ApprovalQueue
 const AutonomousCenter = lazy(() => import('./components/Autonomous/AutonomousCenter'));
 const ExecutionRoom = lazy(() => import('./components/Execution/ExecutionRoom'));
 const WorkspaceExplorer = lazy(() => import('./components/Workspace/WorkspaceExplorer'));
+const SystemHealthView = lazy(() => import('./components/SystemHealth/SystemHealth'));
 
 function ViewFallback() {
   return <div className="flex-1 flex items-center justify-center text-gray-400">加载中…</div>;
@@ -144,6 +145,10 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'workspace') {
     viewKey = 'workspace-' + refreshKey;
     ViewComponent = WorkspaceExplorer;
+    viewProps = {};
+  } else if (view === 'system-health') {
+    viewKey = 'system-health-' + refreshKey;
+    ViewComponent = SystemHealthView;
     viewProps = {};
   } else {
     viewKey = 'home-' + refreshKey;

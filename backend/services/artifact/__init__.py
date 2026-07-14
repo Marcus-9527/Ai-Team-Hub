@@ -32,7 +32,8 @@ class ArtifactService:
 
     def __init__(self, db_url: str = ""):
         if not db_url:
-            db_url = f"sqlite:///{DB_PATH}"
+            from backend.database import get_sync_db_url
+            db_url = get_sync_db_url()
         self._engine = create_engine(
             db_url,
             echo=False,

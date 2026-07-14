@@ -43,4 +43,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python3 -c "import httpx; httpx.get('http://localhost:8910/api/health').raise_for_status()" || exit 1
 
 # Start with uvicorn
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8910", "--reload"] 
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8910"] 

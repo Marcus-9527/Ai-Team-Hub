@@ -1,5 +1,5 @@
 """
-Database setup: SQLite via aiosqlite, async SQLAlchemy.
+Database setup: async SQLAlchemy engine (SQLite via aiosqlite or PostgreSQL via asyncpg).
 """
 import logging
 import os
@@ -11,12 +11,26 @@ logger = logging.getLogger("database")
 DB_PATH = os.environ.get("AI_TEAM_HUB_DB", os.path.join(os.path.dirname(__file__), "..", "data", "aiteamhub.db"))
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+DATABASE_URL = os.environ.get(
+    "AI_TEAM_HUB_DATABASE_URL",
+    f"sqlite+aiosqlite:///{DB_PATH}",
+)
+
+
+def get_sync_db_url() -> str:
+    """Resolve sync DB URL (strips async driver suffix for sync engines)."""
+    url = os.environ.get("AI_TEAM_HUB_DATABASE_URL", "")
+    if url:
+        return url.replace("+aiosqlite", "").replace("+asyncpg", "")
+    return f"sqlite:///{DB_PATH}"
+
+
+_is_sqlite = "sqlite" in DATABASE_URL
 
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
 )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -27,7 +41,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    """Create all tables + enable WAL mode for concurrent writes."""
+    """Create all tables + enable WAL mode for concurrent writes (SQLite only)."""
     from sqlalchemy import text
     from backend.models import Channel, Teammate, APIKey, Message, FileUpload, FileChunk  # noqa: F401
     from backend.models import TaskModel, TaskStepModel, TaskExecutionModel  # noqa: F401
@@ -44,20 +58,18 @@ async def init_db():
     from backend.models import PolicyDecisionModel  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("PRAGMA journal_mode=WAL;"))
-        await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+        if _is_sqlite:
+            await conn.execute(text("PRAGMA journal_mode=WAL;"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
 
-    # ── Idempotent column migration (SQLite: create_all won't add columns
-    #    to tables that already exist). Safe to run every startup. ──
-    await _migrate_columns()
+    if _is_sqlite:
+        await _migrate_columns()
 
 
 async def _migrate_columns() -> None:
     """Add any missing columns to existing tables (idempotent ALTER TABLE)."""
     from sqlalchemy import text
-    from backend.database import async_session
 
-    # (table, column, sql_type) — only columns added after the original schema.
     expected = {
         "tasks": [
             ("review_status", "VARCHAR", "pending"),
@@ -67,9 +79,13 @@ async def _migrate_columns() -> None:
             ("test_result", "TEXT", ""),
             ("review_comments", "TEXT", ""),
             ("review_rounds", "INTEGER", "0"),
+            ("replan_decisions", "JSON", "[]"),
+            ("replan_count", "INTEGER", "0"),
             ("parent_task_id", "VARCHAR", None),
             ("child_task_ids", "JSON", "[]"),
             ("dependency", "JSON", "[]"),
+            ("techlead_summary", "TEXT", ""),
+            ("techlead_decision", "JSON", None),
         ],
         "task_steps": [
             ("deps", "JSON", "[]"),

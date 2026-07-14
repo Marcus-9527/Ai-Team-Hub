@@ -28,6 +28,7 @@ logger = logging.getLogger("autonomous.event_wakeup")
 
 
 class WakeupEvent(Enum):
+    TASK_CREATED = "task_created"
     BRAIN_UPDATED = "brain_updated"
 
 

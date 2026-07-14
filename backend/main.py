@@ -77,7 +77,6 @@ from backend.routes.policy import router as policy_router
 from backend.routes.brain import router as brain_router
 from backend.routes.automation import router as automation_router, automation_poll_loop
 from backend.routes.demo import router as demo_router
-from backend.routes.teams import router as teams_router
 
 logger = logging.getLogger("main")
 
@@ -140,6 +139,14 @@ async def lifespan(app: FastAPI):
     from backend.services.brain.channel_notify_hook import ChannelNotifyHook
     registry.register(ChannelNotifyHook())
     logger.info("ChannelNotifyHook registered — task results → channel messages")
+
+    # ── Step 1: TASK_CREATED → claim competition (skeleton, no execution) ──
+    from backend.services.autonomous.event_wakeup import (
+        get_event_wakeup_bus, WakeupEvent,
+    )
+    from backend.services.autonomous.task_claim_subscriber import handle_task_created
+    get_event_wakeup_bus().subscribe(WakeupEvent.TASK_CREATED, handle_task_created)
+    logger.info("TASK_CREATED wakeup subscriber registered — claim competition on")
 
     # ── API key gate (locks /api + /v1 unless AI_TEAM_HUB_API_KEY is set) ──
     from backend.middleware.auth import ensure_api_key
@@ -279,7 +286,6 @@ app.include_router(brain_router)
 app.include_router(autonomous_router)                 # /api/brain
 app.include_router(automation_router)             # /api/automation
 app.include_router(demo_router)
-app.include_router(teams_router)                    # /api/demo
 
 
 @app.get("/api/health")

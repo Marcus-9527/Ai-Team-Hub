@@ -379,6 +379,22 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)
     except Exception as e:
         logger.debug(f"[ROUTES] TASK_CREATED dispatch failed (non-fatal): {e}")
 
+    # ── Step 1: fire TASK_CREATED on the wakeup bus (claim competition) ──
+    # Coexists with _background_orchestrate below; handler only competes for
+    # the claim, does not enter the execution layer yet.
+    try:
+        from backend.services.autonomous.event_wakeup import (
+            get_event_wakeup_bus, WakeupEvent, WakeupPayload,
+        )
+        get_event_wakeup_bus().fire(WakeupEvent.TASK_CREATED, WakeupPayload(
+            event_type=WakeupEvent.TASK_CREATED.value,
+            task_id=task.id,
+            channel_id=task.channel_id or "",
+            reason="task created via API",
+        ))
+    except Exception as e:
+        logger.debug(f"[ROUTES] TASK_CREATED wakeup fire failed (non-fatal): {e}")
+
     # ── Background orchestration: plan → execute (no blocking) ──
     goal = req.intent or req.title or req.description
     if goal:

@@ -1,17 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, ChevronLeft, ChevronRight, Cpu, Circle, CheckCircle2, ListTodo, PlayCircle } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, Cpu, Circle, CheckCircle2, ListTodo, PlayCircle, Plus } from 'lucide-react';
 import * as api from '../services/api';
 import { useTranslation } from '../i18n';
 import ChannelView from './Channel/ChannelView';
 import CreateTeammateModal from './Teammate/CreateTeammateModal';
 import CreateChannelModal from './Channel/CreateChannelModal';
+import ConfirmDialog from './ConfirmDialog';
 
 /* ── Right: AI Assistant Panel ── */
-function AssistantPanel({ channelId, refreshKey, collapsed, onToggle }) {
+function AssistantPanel({ channelId, refreshKey, collapsed, onToggle, onRefresh }) {
   const t = useTranslation();
   const [teammates, setTeammates] = useState([]);
   const [channel, setChannel] = useState(null);
   const [states, setStates] = useState({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [menuTmId, setMenuTmId] = useState(null);
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => {
     if (!channelId) return;
@@ -79,7 +83,25 @@ function AssistantPanel({ channelId, refreshKey, collapsed, onToggle }) {
       </button>
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[#e2ddd7]">
         <Bot size={14} className="text-[#9ca3af]" />
-        <span className="text-xs font-semibold text-[#5c5c5c] uppercase tracking-wider">{t('chat.assistants')}</span>
+        <span className="text-xs font-semibold text-[#5c5c5c] uppercase tracking-wider flex-1">{t('chat.assistants')}</span>
+        <div className="relative">
+          <button onClick={() => setShowAdd(v => !v)} className="p-1 rounded hover:bg-gray-100 text-[#9ca3af] hover:text-[#1d1d1d] transition-all">
+            <Plus size={14} />
+          </button>
+          {showAdd && (
+            <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-[#e2ddd7] z-50 py-1 min-w-[160px]">
+              {teammates.filter(tm => !channel?.teammate_ids?.includes(tm.id)).map(tm => (
+                <button key={tm.id} onClick={async () => { await api.addTeammateToChannel(channelId, tm.id); setShowAdd(false); setChannel(c => ({ ...c, teammate_ids: [...(c?.teammate_ids || []), tm.id] })); onRefresh?.(); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#1d1d1d] hover:bg-[#f4f2ef] transition-all text-left">
+                  <span>{tm.avatar_emoji || '🤖'}</span>
+                  <span className="truncate">{tm.name}</span>
+                </button>
+              ))}
+              {teammates.filter(tm => !channel?.teammate_ids?.includes(tm.id)).length === 0 && (
+                <p className="text-xs text-[#9ca3af] text-center py-2">暂无可用队友</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
         {channelTeammates.map(tm => {
@@ -87,7 +109,7 @@ function AssistantPanel({ channelId, refreshKey, collapsed, onToggle }) {
           const dotColor = STATE_DOT[st] || STATE_DOT.idle;
           const stLabel = STATE_LABEL[st] || st;
           return (
-            <div key={tm.id} className="flex items-start gap-3 p-2.5 rounded-xl border border-[#e2ddd7] bg-white">
+            <div key={tm.id} className="group relative flex items-start gap-3 p-2.5 rounded-xl border border-[#e2ddd7] bg-white">
               <div className="relative flex-shrink-0">
                 <span className="text-lg">{tm.avatar_emoji || '🤖'}</span>
                 <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${dotColor}`} />
@@ -103,6 +125,16 @@ function AssistantPanel({ channelId, refreshKey, collapsed, onToggle }) {
                   <span className="truncate">{tm.model_name || tm.model_provider || '-'}</span>
                 </div>
               </div>
+              <div className="relative flex-shrink-0">
+                <button onClick={() => setMenuTmId(menuTmId === tm.id ? null : tm.id)} className="p-0.5 rounded hover:bg-gray-100 text-[#9ca3af] hover:text-[#1d1d1d] transition-all opacity-0 group-hover:opacity-100">
+                  <span className="text-xs font-bold leading-none tracking-wider">⋯</span>
+                </button>
+                {menuTmId === tm.id && (
+                  <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-[#e2ddd7] z-50 py-1 min-w-[130px]">
+                    <button onClick={() => { setMenuTmId(null); setConfirm({ title: '移出频道', message: `确定将「${tm.name}」移出当前频道？`, confirmText: '移出', onConfirm: async () => { await api.removeTeammateFromChannel(channelId, tm.id); setChannel(c => ({ ...c, teammate_ids: (c?.teammate_ids || []).filter(id => id !== tm.id) })); onRefresh?.(); } }); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-all text-left">移出频道</button>
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -110,6 +142,7 @@ function AssistantPanel({ channelId, refreshKey, collapsed, onToggle }) {
           <p className="text-[11px] text-[#9ca3af] text-center py-4">{t('teammate.none_in_channel')}</p>
         )}
       </div>
+      <ConfirmDialog state={[confirm, setConfirm]} />
     </div>
   );
 }
@@ -161,6 +194,7 @@ export default function ChatLayout({ channelId, setChannelId, triggerRefresh, re
         refreshKey={refreshKey}
         collapsed={rightCollapsed}
         onToggle={() => setRightCollapsed(v => !v)}
+        onRefresh={triggerRefresh}
       />
       {showCreate && (
         <CreateChannelModal

@@ -458,22 +458,6 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
             </div>
           </div>
         </div>
-        {/* Teammate member list bar */}
-        {channelTeammates.length > 0 && (
-          <div className="flex items-center gap-1.5 px-5 pb-2.5 overflow-x-auto">
-            {channelTeammates.map(tm => (
-              <div
-                key={tm.id}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-canvas-lavender/40 border border-hairline/50 flex-shrink-0"
-              >
-                <span className="text-sm leading-none">{tm.avatar_emoji || '🤖'}</span>
-                <span className="text-[11px] font-medium text-ink-mute whitespace-nowrap">{tm.name}</span>
-
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Removed: old inline manage panel */}
       </div>
 

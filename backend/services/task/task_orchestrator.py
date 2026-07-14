@@ -100,6 +100,29 @@ class TaskOrchestrator:
                 "team_count": len(dag.nodes),
             })
 
+            # fail-fast: 任何节点没分到队友就直接 FAILED 并写明原因，
+            # 不要带着空 teammate_id 进入执行层（卡到 120s 超时还看不到原因）。
+            # ponytail: 一处检查覆盖所有 start_task 调用方。
+            unassigned = [
+                n for n in dag.nodes.values()
+                if not (n.selected_teammate_id or n.teammate)
+            ]
+            if unassigned:
+                task = await self._manager.get_task(db, task_id)
+                reason = (
+                    f"无法分配队友：{len(unassigned)}/{len(dag.nodes)} 个步骤没有可用队友"
+                    f"（队友列表为空、全部离线或认领锁冲突）。"
+                )
+                task.error = reason
+                await db.flush()
+                task = await self._manager.fail(db, task_id)
+                await db.commit()
+                _sse_event("execution_completed", task_id, {
+                    "status": "FAILED",
+                    "error": reason,
+                })
+                return task
+
             # 3. Persist DAG to DB (after assignment, so selected_teammate_id is saved)
             await self._persist_dag(db, dag, task_id)
             await db.commit()
@@ -251,10 +274,11 @@ class TaskOrchestrator:
 
         Phase 24: TeammateSelector → TaskClaim lock → assignment.
         Phase 26: TechLead recommendation override → selector support + validation.
-        ponytail: every node MUST end up with a teammate — an unassigned
-        step makes the executor fall back to task.api_key (always empty on
-        create), which throws 'api_key is required' and the runtime event
-        never gets set, so the task hangs at PLANNING forever.
+        ponytail: every node MUST end up with a teammate. If DB has no
+        teammates (or all offline / all claims lost) the round-robin fallback
+        can't assign anyone — start_task fails fast on that (see after
+        _assign_and_save), so we don't carry an empty teammate_id into the
+        runtime and hang at PLANNING.
         """
         task_id = task.id
         # Lazy-load all teammates once, for the round-robin fallback.

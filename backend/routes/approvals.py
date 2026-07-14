@@ -5,7 +5,8 @@ GET  /api/approvals?all=1    — list all approvals
 POST /api/approvals/{id}/approve — approve a pending request
 POST /api/approvals/{id}/reject  — reject a pending request
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from backend.middleware.auth import require_admin
 from pydantic import BaseModel
 
 from backend.services.approval import get_approval_service
@@ -29,7 +30,7 @@ async def list_approvals(all: bool = False):
     return {"approvals": svc.list_pending()}
 
 
-@router.post("/{approval_id}/approve")
+@router.post("/{approval_id}/approve", dependencies=[Depends(require_admin)])
 async def approve_approval(approval_id: str, req: ApproveRequest):
     svc = get_approval_service()
     rec = svc.approve(approval_id, by=req.by)
@@ -38,7 +39,7 @@ async def approve_approval(approval_id: str, req: ApproveRequest):
     return {"approval": rec.to_dict()}
 
 
-@router.post("/{approval_id}/reject")
+@router.post("/{approval_id}/reject", dependencies=[Depends(require_admin)])
 async def reject_approval(approval_id: str, req: RejectRequest):
     svc = get_approval_service()
     rec = svc.reject(approval_id, by=req.by)

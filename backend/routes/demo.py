@@ -7,6 +7,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends
+from backend.middleware.auth import require_admin
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db, async_session
@@ -18,7 +19,7 @@ logger = logging.getLogger("routes.demo")
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 
 
-@router.post("/init")
+@router.post("/init", dependencies=[Depends(require_admin)])
 async def demo_init():
     """Initialize a demo workspace with teammates, channel, and sample task.
 

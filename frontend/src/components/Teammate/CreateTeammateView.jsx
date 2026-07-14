@@ -396,6 +396,7 @@ export default function CreateTeammateView({ onDone, onCancel }) {
                       className="prose prose-sm max-w-none message-content"
                       dangerouslySetInnerHTML={{
                         __html: prompt
+                          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                           .replace(/^# (.+)$/gm, '<h2 class="text-lg font-extrabold text-ink mt-6 mb-3">$1</h2>')
                           .replace(/^## (.+)$/gm, '<h3 class="text-base font-bold text-ink mt-4 mb-2">$1</h3>')
                           .replace(/^### (.+)$/gm, '<h4 class="text-sm font-semibold text-ink mt-3 mb-1">$1</h4>')

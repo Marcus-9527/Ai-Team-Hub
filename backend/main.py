@@ -213,10 +213,12 @@ app.add_middleware(
 
 # P3 #6 (short-term mitigation): lock down script sources so a same-origin XSS
 # can't pull an external script to exfiltrate the API key from localStorage.
-# Inline scripts are still allowed because the SPA/legacy routes rely on them.
+# 'unsafe-eval' removed (no eval in the app bundle). 'unsafe-inline' retained
+# because legacy/SPA routes rely on inline scripts — dropping it whitescreens
+# the app; move inline → external files + nonce before removing it.
 _CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https:; "
     "connect-src 'self'; "
@@ -282,12 +284,7 @@ app.include_router(teams_router)                    # /api/demo
 
 @app.get("/api/health")
 async def health():
-    return {
-        "status": "ok",
-        "service": "AI Team Hub",
-        "version": "2.1.0",
-        "engine": "team_engine",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/api/cache/stats")

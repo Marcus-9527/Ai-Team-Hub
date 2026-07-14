@@ -28,17 +28,13 @@ const ROLE_TEMPLATES = [
 
 /**
  * 极简创建队友 Modal —— Chat / Team 页通用。
- * 基础：名称 / 角色 / 能力标签 / 模型（自动推荐 or 手动选择）。
+ * 基础：角色 / 模型（自动推荐 or 手动选择）。
  * 高级（默认隐藏）：System Prompt / 角色模板 / 工具权限 / 记忆设置。
  */
 export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
   const t = useTranslation();
   const isEdit = !!teammate;
-  const [name, setName] = useState(teammate?.name || '');
   const [role, setRole] = useState(teammate?.role || '');
-  const [capabilities, setCapabilities] = useState(
-    (teammate?.capabilities || []).filter((c) => c !== 'memory').join('、')
-  );
   const [provider, setProvider] = useState(teammate?.model_provider || 'openrouter');
   const [model, setModel] = useState(teammate?.model_name || '');
   const [apiKeys, setApiKeys] = useState([]);
@@ -55,17 +51,16 @@ export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
   }, []);
 
   const handleCreate = async () => {
-    if (!name.trim() || saving) return;
+    if (saving) return;
     setSaving(true);
     setError('');
     try {
-      const caps = capabilities.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      const caps = [];
       if (memory) caps.push('memory');
       const roleText = role.trim() || 'AI 助手';
       const skillList = tools.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-      const autoPrompt = `你是${roleText}，擅长：${caps.filter((c) => c !== 'memory').join('、') || '通用任务'}。`;
+      const autoPrompt = `你是${roleText}，擅长：通用任务。`;
       const payload = {
-        name: name.trim(),
         role: roleText,
         capabilities: caps,
         model_provider: provider,
@@ -103,30 +98,13 @@ export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
           </button>
         </div>
 
-        {fieldLabel(t('teammate.chat_name'))}
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t('teammate.name_placeholder')}
-          className={inputCls + ' mb-3'}
-          autoFocus
-          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-        />
-
         {fieldLabel(t('teammate.chat_role'))}
         <input
           value={role}
           onChange={(e) => setRole(e.target.value)}
           placeholder={t('teammate.chat_role_ph')}
           className={inputCls + ' mb-3'}
-        />
-
-        {fieldLabel(t('teammate.chat_capabilities'))}
-        <input
-          value={capabilities}
-          onChange={(e) => setCapabilities(e.target.value)}
-          placeholder={t('teammate.chat_capabilities_ph')}
-          className={inputCls + ' mb-3'}
+          autoFocus
         />
 
         {/* 模型选择：两步式（AI 服务商 → 模型），自定义组件替代原生 select */}
@@ -204,7 +182,7 @@ export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
           </button>
           <button
             onClick={handleCreate}
-            disabled={saving || !name.trim()}
+            disabled={saving}
             className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold disabled:opacity-50 transition-all"
           >
             {saving ? t('teammate.chat_creating') : (isEdit ? t('teammate.edit') : t('teammate.chat_create'))}

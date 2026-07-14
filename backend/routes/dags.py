@@ -1,6 +1,7 @@
 """DAG API routes — create, view, execute DAGs (v2, DB-backed)."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from backend.middleware.auth import require_admin
 from pydantic import BaseModel
 
 from backend.services.dag.core import DAGDefinition, DAGNode, detect_cycle, topological_sort
@@ -26,7 +27,7 @@ class CreateDAGRequest(BaseModel):
     nodes: list[NodeDef]
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def create_dag(req: CreateDAGRequest):
     dag = DAGDefinition(name=req.name)
     id_map: dict[str, str] = {}  # user-provided id → server node id

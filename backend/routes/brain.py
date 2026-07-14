@@ -9,7 +9,8 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from backend.middleware.auth import require_admin
 
 from backend.services.memory.memory_service import get_memory_service
 from backend.services.memory.memory_intelligence import get_intelligence_service
@@ -73,7 +74,7 @@ async def brain_search(q: str = Query("", description="Search query"), top_k: in
     return {"items": [it.to_dict() for it in items], "count": len(items)}
 
 
-@router.post("/reflect")
+@router.post("/reflect", dependencies=[Depends(require_admin)])
 async def brain_reflect(task_id: str = ""):
     """Trigger insight generation for a task. Fire-and-forget."""
     intel = get_intelligence_service()
@@ -122,7 +123,7 @@ async def list_fragment_versions(teammate_id: str, fragment_type: str):
     return {"versions": [v.to_dict() for v in versions], "count": len(versions)}
 
 
-@router.post("/fragments/{teammate_id}/{fragment_type}/rollback")
+@router.post("/fragments/{teammate_id}/{fragment_type}/rollback", dependencies=[Depends(require_admin)])
 async def rollback_fragment(teammate_id: str, fragment_type: str, target_version: int = Query(...)):
     """Rollback a fragment to a previous version."""
     store = get_brain_fragment_store()
@@ -156,7 +157,7 @@ async def list_fragment_types():
     return {"types": [e.value for e in BrainFragmentType]}
 
 
-@router.post("/consolidate")
+@router.post("/consolidate", dependencies=[Depends(require_admin)])
 async def trigger_consolidation(lookback_hours: int = 48):
     """Manually trigger memory → brain consolidation. Returns count of fragments created."""
     svc = get_consolidation_service()

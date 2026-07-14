@@ -11,6 +11,7 @@ import uuid
 import time
 import secrets
 import logging
+from collections import defaultdict, deque
 from fastapi import Depends, HTTPException, Header, Request, Security
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -139,6 +140,23 @@ class RequestContext:
         return round((time.time() - self.start_time) * 1000, 2)
 
 
+# ── In-memory rate limiter (ponytail: per-process sliding window, no deps) ──
+# Ceiling: single global dict, not shared across workers/replicas. If you run
+# multiple backend processes or need per-account fairness, move to Redis.
+_RATE_LIMIT = int(os.environ.get("AI_TEAM_HUB_RATE_LIMIT", "120"))  # requests / window
+_RATE_WINDOW = int(os.environ.get("AI_TEAM_HUB_RATE_WINDOW", "60"))  # seconds
+_hits: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limited(ident: str) -> bool:
+    now = time.time()
+    dq = _hits[ident]
+    while dq and dq[0] <= now - _RATE_WINDOW:
+        dq.popleft()
+    dq.append(now)
+    return len(dq) > _RATE_LIMIT
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """
     Extracts API key from request, sets RequestContext.
@@ -192,6 +210,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             request.state.tenant_id = "default"
             request.state.api_key = api_key
+
+            # Sliding-window rate limit per (key, IP). SSE/streaming and normal
+            # browsing stay well under 120/min; a brute-forcer or quota abuser
+            # trips it. 429 keeps a leaked key from burning the model budget.
+            client_ip = request.client.host if request.client else "noip"
+            if _rate_limited(f"{api_key}:{client_ip}"):
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded; slow down"},
+                )
 
         response = await call_next(request)
         req_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())

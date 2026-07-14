@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from backend.middleware.auth import require_admin
 from pydantic import BaseModel
 
 from backend.services.autonomous.teammate_state import (
@@ -86,7 +87,7 @@ async def get_state(teammate_id: str):
     return st.to_dict()
 
 
-@router.post("/states")
+@router.post("/states", dependencies=[Depends(require_admin)])
 async def set_state(req: SetStateRequest):
     """Set a teammate's runtime state."""
     try:
@@ -104,7 +105,7 @@ async def set_state(req: SetStateRequest):
 
 # ── Cede Protocol ──
 
-@router.post("/cede/decide")
+@router.post("/cede/decide", dependencies=[Depends(require_admin)])
 async def cede_decide(req: CedeDecideRequest):
     """Decide whether a teammate should respond/cede/ignore a message."""
     teammate = {"id": req.teammate_id, "name": req.teammate_name}
@@ -185,7 +186,7 @@ async def get_proposal(proposal_id: str):
     return proposal.to_dict()
 
 
-@router.post("/proposals/approve")
+@router.post("/proposals/approve", dependencies=[Depends(require_admin)])
 async def approve_proposal(req: ApproveProposalRequest):
     """Approve a brain proposal (applies the change)."""
     manager = get_proposal_manager()
@@ -196,7 +197,7 @@ async def approve_proposal(req: ApproveProposalRequest):
     return {"success": ok, "message": msg}
 
 
-@router.post("/proposals/reject")
+@router.post("/proposals/reject", dependencies=[Depends(require_admin)])
 async def reject_proposal(req: RejectProposalRequest):
     """Reject a brain proposal (no change)."""
     manager = get_proposal_manager()

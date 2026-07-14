@@ -3,6 +3,7 @@
 POST /api/teams/template — one-click AI team creation.
 """
 from fastapi import APIRouter, Depends, HTTPException
+from backend.middleware.auth import require_admin
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.database import get_db
 from backend.models import Channel, Teammate, gen_uuid
@@ -36,7 +37,7 @@ _TEMPLATES = {
 }
 
 
-@router.post("/template")
+@router.post("/template", dependencies=[Depends(require_admin)])
 async def create_team_from_template(data: dict, db: AsyncSession = Depends(get_db)):
     """Create a channel + teammates from a named template."""
     template_name = data.get("template", "default")

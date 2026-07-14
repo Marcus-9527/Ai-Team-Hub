@@ -78,6 +78,15 @@ async def create_teammate(data: dict, db: AsyncSession = Depends(get_db)):
     item = _serialize_teammate(teammate)
     teammate_cache.set(teammate.id, item)
 
+    # B: register as available in the in-memory runtime state so the
+    # TASK_CREATED wakeup competition has candidates to claim against.
+    # ponytail: ACTIVE = ready to compete; executor flips to WORKING on run.
+    try:
+        from backend.services.autonomous.teammate_state import get_state_manager
+        await get_state_manager().set_active(teammate.id)
+    except Exception as e:
+        logger.debug("[TEAMMATE] state registration skipped: %s", e)
+
     return {"id": teammate.id, "name": teammate.name}
 
 

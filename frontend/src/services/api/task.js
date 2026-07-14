@@ -4,11 +4,11 @@
  * Matches backend routes/tasks.py (v2.5+ Task Runtime).
  * All methods return parsed JSON, throw on non-2xx.
  */
-const BASE = import.meta.env.VITE_API_BASE || '';
+import { BASE, authHeaders } from '../auth';
 
 async function request(url, options = {}) {
   const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { ...authHeaders(), ...options.headers },
     ...options,
   });
   if (!res.ok) {

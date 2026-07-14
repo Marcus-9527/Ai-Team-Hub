@@ -142,17 +142,25 @@ async def test_state_history():
 
 # ── 4. Cede protocol anti-redundancy ──
 
-async def test_cede_only_one_responds():
-    """Multiple teammates evaluating same message → only one RESPOND."""
+async def test_cede_relevant_teammates_respond():
+    """Multiple teammates → all relevant ones RESPOND, off-domain ones CEDE.
+
+    engineer + reviewer are both engineering-domain, so a refactor message
+    makes both respond. A designer (off-domain) would cede.
+    """
     cede = CedeProtocol()
     msg_id = "msg_dedup"
     engineer = {"id": "tm_e", "name": "Eng", "role": "engineer"}
     reviewer = {"id": "tm_r", "name": "Rev", "role": "reviewer"}
+    designer = {"id": "tm_d", "name": "Des", "role": "designer"}
 
     msg = "Refactor the auth module"
-    for tm in [engineer, reviewer]:
+    for tm in [engineer, reviewer, designer]:
         d = await cede.decide(tm, msg, message_id=msg_id)
         await cede.record_decision(tm, msg_id, d)
 
     responded = await cede.who_responded(msg_id)
-    assert len(responded) == 1
+    responded_ids = {r.teammate_id for r in responded}
+    assert "tm_e" in responded_ids
+    assert "tm_r" in responded_ids
+    assert "tm_d" not in responded_ids

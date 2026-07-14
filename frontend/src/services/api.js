@@ -1,17 +1,36 @@
 /**
  * API client for AI Team Hub backend.
  */
-const BASE = import.meta.env.VITE_API_BASE || '';
+import { BASE, authHeaders, API_KEY } from './auth';
+import { toast } from './toast';
+
+const TIMEOUT_MS = 15000;
 
 async function request(url, options = {}) {
-  const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${BASE}${url}`, {
+      headers: { ...authHeaders(), ...options.headers },
+      ...options,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    const msg = e.name === 'AbortError'
+      ? '请求超时,后端可能没有响应'
+      : '无法连接后端,请检查服务是否已启动';
+    toast(msg);
+    throw new Error(msg);
+  }
+  clearTimeout(timer);
+
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
     try { msg = JSON.parse(text).detail || text; } catch {}
+    toast(msg);
     throw new Error(msg);
   }
   return res.json();
@@ -33,7 +52,7 @@ export const sendMessage = (channelId, content, authorName = 'You', teammateIds 
   }
   return fetch(`${BASE}/api/messages/${channelId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
     body: JSON.stringify(body),
   });
 };
@@ -45,7 +64,7 @@ export const uploadFileMsg = (channelId, file, authorName = 'You') => {
   return fetch(`${BASE}/api/messages/${channelId}/file`, {
     method: 'POST',
     body: form,
-    headers: { 'X-Author-Name': authorName },
+    headers: API_KEY ? { 'X-API-Key': API_KEY, 'X-Author-Name': authorName } : { 'X-Author-Name': authorName },
   });
 };
 
@@ -161,7 +180,7 @@ export const fireWakeupEvent = (eventType, taskId = '', teammateId = '', reason 
     body: JSON.stringify({ event_type: eventType, task_id: taskId, teammate_id: teammateId, reason }),
   });
 export const getWakeupEvents = (eventType = '', limit = 20) =>
-  request(`/api/autonomous/events${eventType ? `?event_type=${eventType}` : ''}&limit=${limit}`);
+  request(`/api/autonomous/events?${eventType ? `event_type=${eventType}&` : ''}limit=${limit}`);
 
 // Brain Proposals
 export const listProposals = (status = '', teammateId = '', limit = 50) => {

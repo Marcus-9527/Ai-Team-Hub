@@ -389,6 +389,12 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)
 async def _background_orchestrate(task_id: str, goal: str) -> None:
     """Run TaskOrchestrator in background with its own DB session."""
     from backend.database import async_session
+    from backend.services.task.task_manager import TaskManager
+    from backend.services.task.task_hooks import (
+        TaskLifecycleEvent,
+        TaskHookContext,
+        get_task_hook_registry,
+    )
     async with async_session() as db:
         try:
             runtime = _get_runtime()
@@ -400,8 +406,6 @@ async def _background_orchestrate(task_id: str, goal: str) -> None:
             logger.warning("[BG-ORCH] Background orchestration for %s failed: %s", task_id[:8], e)
             try:
                 await db.rollback()
-                # Mark task FAILED so it's not left in a weird state
-                from backend.services.task.task_manager import TaskManager
                 mgr = TaskManager()
                 task = await mgr.get_task(db, task_id)
                 if task and task.status not in ("COMPLETED", "FAILED", "CANCELLED"):
@@ -409,6 +413,30 @@ async def _background_orchestrate(task_id: str, goal: str) -> None:
                     await db.commit()
             except Exception:
                 pass
+
+        # ── Dispatch completion hooks (Memory → Brain → Channel Notify) ──
+        # ponytail: one dispatch here covers the whole background path; no
+        # new scheduler/queue. Uses the live task so ctx carries real data.
+        try:
+            mgr = TaskManager()
+            task = await mgr.get_task(db, task_id)
+            if task:
+                lifecycle = (
+                    TaskLifecycleEvent.TASK_COMPLETED
+                    if task.status == "COMPLETED"
+                    else TaskLifecycleEvent.TASK_FAILED
+                )
+                ctx = TaskHookContext(
+                    task_id=task.id,
+                    task_title=task.title,
+                    task_description=task.description,
+                    task_status=task.status,
+                    channel_id=task.channel_id or "",
+                    workspace_id=task.workspace_id or "",
+                )
+                await get_task_hook_registry().dispatch(lifecycle, ctx)
+        except Exception as e:
+            logger.debug("[BG-ORCH] completion hook dispatch failed (non-fatal): %s", e)
 
 
 @router.get("", response_model=TaskListResponse)
@@ -543,6 +571,10 @@ async def plan_task(task_id: str, db: AsyncSession = Depends(get_db)):
         profiles = await TeammateSelector.recommend_by_skills(
             required_skills, top_n=3, db=db,
         )
+        # ponytail: no teammate carries the generic skill tags → fall back to
+        # any teammates so planning still produces steps.
+        if not profiles:
+            profiles = await TeammateSelector.recommend_by_skills([], top_n=3, db=db)
 
         if profiles:
             steps = []

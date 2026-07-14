@@ -313,7 +313,7 @@ export default function PitchDeck({ onBack }) {
         }
       `}</style>
 
-      <button className="pd-back" onClick={() => onBack ? onBack() : (window.location.hash = '#/landing')}>
+      <button className="pd-back" onClick={() => onBack ? onBack() : (window.location.hash = '#/')}>
         ← Back
       </button>
 

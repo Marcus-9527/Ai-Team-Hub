@@ -118,7 +118,7 @@ class TaskExecutor:
         # Initialize trace + event loggers
         trace_id = str(uuid.uuid4())
         trace = TraceLogger(trace_id=trace_id, task_id=task.id)
-        events = TaskEventLogger(task_id=task.id)
+        events = TaskEventLogger(task_id=task.id, task=task)
 
         events.log_started()
 
@@ -515,7 +515,7 @@ class TaskExecutor:
         # 2. Runtime submit
         trace_id = str(uuid.uuid4())
         trace = TraceLogger(trace_id=trace_id, task_id=task.id)
-        events = TaskEventLogger(task_id=task.id)
+        events = TaskEventLogger(task_id=task.id, task=task)
 
         events.log_started()
         rt_id = await self._runtime.submit(

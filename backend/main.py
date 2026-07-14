@@ -141,6 +141,10 @@ async def lifespan(app: FastAPI):
     registry.register(ChannelNotifyHook())
     logger.info("ChannelNotifyHook registered — task results → channel messages")
 
+    # ── API key gate (locks /api + /v1 unless AI_TEAM_HUB_API_KEY is set) ──
+    from backend.middleware.auth import ensure_api_key
+    ensure_api_key()
+
     # ── Model auto-sync ──
     # Always sync on startup when online (non-blocking)
     try:

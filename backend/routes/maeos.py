@@ -12,9 +12,13 @@ Provides:
 """
 
 import asyncio
+import logging
+import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+
+logger = logging.getLogger("maeos")
 
 router = APIRouter(prefix="/api/maeos", tags=["maeos"])
 
@@ -35,7 +39,11 @@ _init_lock: Optional[asyncio.Lock] = None
 async def _get_maeos(**kwargs):
     """Get or initialize Team Engine singleton (async-safe)."""
     global _maeos, _init_lock
+    # If MAEOS was already started but has no api_key, upgrade it
+    # (happens when init_maeos(max_workers=4) was called without a key).
     if _maeos is not None and _maeos._started:
+        if not _maeos._runtime.default_api_key and not kwargs.get("api_key"):
+            await _upgrade_maeos_key(_maeos)
         return _maeos
 
     if _init_lock is None:
@@ -46,9 +54,49 @@ async def _get_maeos(**kwargs):
             return _maeos
 
         from backend.services.maeos import MAEOS
+        # ponytail: when no api_key was configured, try to load the first
+        # active workspace key from the DB so planning tasks don't fail.
+        if not kwargs.get("api_key") and not os.environ.get("AI_TEAM_HUB_API_KEY"):
+            await _apply_db_key_to_kwargs(kwargs)
         _maeos = MAEOS(**kwargs)
         await _maeos.start()
         return _maeos
+
+
+async def _apply_db_key_to_kwargs(kwargs: dict) -> None:
+    """Mutate kwargs in-place with the first active DB key."""
+    try:
+        from backend.database import async_session
+        from backend.models import APIKey
+        from sqlalchemy import select
+        from backend.crypto import decrypt_value
+        async with async_session() as sess:
+            row = (await sess.execute(
+                select(APIKey).where(APIKey.is_active == "1").limit(1)
+            )).scalar_one_or_none()
+            if row:
+                plain = decrypt_value(row.api_key)
+                if plain:
+                    kwargs.setdefault("provider", row.provider)
+                    kwargs["api_key"] = plain
+                    if row.base_url:
+                        kwargs["base_url"] = row.base_url
+                    logger.info("[MAEOS] auto-loaded API key from DB: %s", row.id[:8])
+    except Exception as e:
+        logger.warning("[MAEOS] failed to auto-load API key: %s", e)
+
+
+async def _upgrade_maeos_key(maeos) -> None:
+    """Populate an existing MAEOS instance's default key from DB."""
+    from backend.services.runtime.executor import ExecutionRuntime
+    kwargs = {}
+    await _apply_db_key_to_kwargs(kwargs)
+    if kwargs.get("api_key"):
+        maeos._runtime.default_api_key = kwargs["api_key"]
+        maeos._runtime.default_provider = kwargs.get("provider", maeos._runtime.default_provider)
+        if kwargs.get("base_url"):
+            maeos._runtime.default_base_url = kwargs["base_url"]
+        logger.info("[MAEOS] upgraded existing MAEOS with DB key")
 
 
 def init_maeos(max_workers: int = 4, provider: str = "openrouter",

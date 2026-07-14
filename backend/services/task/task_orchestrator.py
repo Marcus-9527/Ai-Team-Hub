@@ -234,18 +234,41 @@ class TaskOrchestrator:
         logger.info("[ORCH] Persisted DAG %s (%d nodes)", dag.id[:8], len(dag.nodes))
 
     async def _assign_and_save(self, db: AsyncSession, task_id: str, dag):
-        """Assign unassigned teammates and persist the plan."""
+        """Assign unassigned teammates and persist the plan.
+
+        ponytail: every node MUST end up with a teammate — an unassigned
+        step makes the executor fall back to task.api_key (always empty on
+        create), which throws 'api_key is required' and the runtime event
+        never gets set, so the task hangs at PLANNING forever.
+        """
+        # Lazy-load all teammates once, for the round-robin fallback.
+        from sqlalchemy import select
+        from backend.models import Teammate as _TM
+        all_tm = (await db.execute(select(_TM))).scalars().all()
+        tm_cycle = iter(all_tm) if all_tm else iter(())
+
         for node in dag.nodes.values():
-            if node.required_skills and not node.selected_teammate_id and not node.teammate:
-                try:
+            if node.selected_teammate_id or node.teammate:
+                continue
+            try:
+                if node.required_skills:
                     profiles = await TeammateSelector.recommend_by_skills(
                         node.required_skills, top_n=1, db=db,
                     )
                     if profiles:
                         node.selected_teammate_id = profiles[0].id
                         node.teammate = profiles[0].name
-                except Exception:
-                    pass
+                        continue
+                # ponytail: no skill match (or no skills) → any teammate
+                nxt = next(tm_cycle, None)
+                if nxt is None and all_tm:
+                    tm_cycle = iter(all_tm)
+                    nxt = next(tm_cycle, None)
+                if nxt:
+                    node.selected_teammate_id = nxt.id
+                    node.teammate = nxt.name
+            except Exception:
+                pass
 
         ordered = list(dag.nodes.values())
         plan_steps = [

@@ -7,6 +7,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/gsap')) return 'gsap-vendor';
+        },
+      },
+    },
   },
   server: {
     port: 5173,
@@ -15,7 +23,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8910',
+        target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
     },

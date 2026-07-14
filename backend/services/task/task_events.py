@@ -44,11 +44,59 @@ class TaskEvent:
 
 
 class TaskEventLogger:
-    """Structured event logger for task lifecycle."""
+    """Structured event logger for task lifecycle.
 
-    def __init__(self, task_id: str):
+    Also dispatches events to the TaskHookRegistry (Memory → Brain → Channel
+    Notify). The logger holds a reference to the live TaskModel and merges its
+    fields (title, channel_id, workspace_id, teammate) into every hook context
+    so the Memory/Brain/Channel-Notify chain always has real data — whether the
+    event is emitted from the route layer or the background orchestration path.
+    """
+
+    def __init__(self, task_id: str, task: Optional["TaskModel"] = None):
         self.task_id = task_id
+        self._task = task
         self._events: list[TaskEvent] = []
+
+    def bind(self, task) -> None:
+        """Attach / refresh the live task object (call after any reload)."""
+        self._task = task
+
+    def _task_ctx(self) -> dict:
+        """Base hook context fields pulled from the live task."""
+        t = self._task
+        if t is None:
+            return {}
+        return {
+            "task_id": t.id,
+            "task_title": getattr(t, "title", "") or "",
+            "task_description": getattr(t, "description", "") or "",
+            "task_status": getattr(t, "status", "") or "",
+            "channel_id": getattr(t, "channel_id", "") or "",
+            "workspace_id": getattr(t, "workspace_id", "") or "",
+        }
+
+    def _aggregate_teammate_id(self) -> str:
+        """Resolve a teammate id for the hook context.
+
+        TaskModel has no teammate_id column — the id lives on each
+        TaskStepModel. A task is typically driven by one teammate, so we
+        take the first step that carries one. Without this, Memory → Brain
+        → Channel-Notify hooks receive an empty execution_teammate_id and
+        BrainTaskHook (gated on `if ctx.execution_teammate_id`) silently
+        no-ops on every backend-orchestrated task.
+        """
+        t = self._task
+        if t is None:
+            return ""
+        tid = getattr(t, "teammate_id", "") or ""
+        if not tid and hasattr(t, "steps"):
+            for s in (t.steps or []):
+                sid = getattr(s, "teammate_id", "") or ""
+                if sid:
+                    tid = sid
+                    break
+        return tid
 
     def _emit(self, event_type: str, **kwargs) -> TaskEvent:
         event = TaskEvent(
@@ -87,9 +135,13 @@ class TaskEventLogger:
             if lifecycle is None:
                 return  # not a mapped event type
 
-            # Build context from available TaskEvent fields
+            # Merge live-task fields with event-specific fields. The task gives
+            # us title/channel_id/workspace_id; the event gives step/execution
+            # detail. This is the single source of truth for hook context, so
+            # the Memory → Brain → Channel-Notify chain works on every path
+            # (route layer and background orchestration alike).
             ctx = TaskHookContext(
-                task_id=event.task_id,
+                **self._task_ctx(),
                 step_id=event.step_id,
                 step_order=event.step_order,
                 step_objective=event.data.get("objective", ""),
@@ -99,7 +151,11 @@ class TaskEventLogger:
                 execution_outcome=event.data.get("outcome", ""),
                 execution_duration_ms=event.data.get("duration_ms", 0),
                 execution_total_tokens=event.data.get("total_tokens", 0),
-                execution_teammate_id=event.data.get("teammate_id", ""),
+                execution_teammate_id=(
+                    event.data.get("teammate_id")
+                    or self._aggregate_teammate_id()
+                    or ""
+                ),
                 extra=dict(event.data),
             )
 

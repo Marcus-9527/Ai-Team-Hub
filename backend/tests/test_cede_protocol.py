@@ -16,7 +16,12 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_only_one_responds():
-    """Multiple teammates → only one should RESPOND to a message."""
+    """Multiple teammates → relevant ones RESPOND, off-domain ones CEDE.
+
+    Engineer is engineering-domain so it RESPONDs to a code task; designer is
+    off-domain so it CEDEs. Both records are kept; no cross-teammate claim
+    guard forces a single responder.
+    """
     cede = CedeProtocol()
     message_id = "msg_test_1"
     channel_id = "ch_test"
@@ -26,20 +31,19 @@ async def test_only_one_responds():
 
     msg_with_code = "Can you implement a REST API for user authentication?"
 
-    # Engineer should RESPOND (relevant to engineering)
     d1 = await cede.decide(engineer, msg_with_code, channel_id, message_id)
     await cede.record_decision(engineer, message_id, d1, channel_id)
 
-    # Designer should CEDE or IGNORE (not primarily a design task)
     d2 = await cede.decide(designer, msg_with_code, channel_id, message_id)
     await cede.record_decision(designer, message_id, d2, channel_id)
 
     responded = await cede.who_responded(message_id)
 
-    # Only one RESPOND
+    # Engineer (relevant) responds, designer (off-domain) cedes
     assert len(responded) == 1
     assert responded[0].teammate_id == "tm_eng"
     assert d1 == CedeDecision.RESPOND
+    assert d2 == CedeDecision.CEDE
 
 
 async def test_no_duplicate_response():
@@ -48,14 +52,14 @@ async def test_no_duplicate_response():
     msg_id = "msg_test_2"
 
     eng = {"id": "tm_eng", "name": "Engineer", "role": "engineer"}
-    msg = "Fix the CSS layout issues"
+    msg = "Fix the python bug in the auth module"
 
     # First call → RESPOND
     d1 = await cede.decide(eng, msg, message_id=msg_id)
     assert d1 == CedeDecision.RESPOND
     await cede.record_decision(eng, msg_id, d1)
 
-    # Second call (same teammate, same message) → CEDE
+    # Second call (same teammate, same message) → CEDE (dedup guard)
     d2 = await cede.decide(eng, msg, message_id=msg_id)
     assert d2 == CedeDecision.CEDE
 

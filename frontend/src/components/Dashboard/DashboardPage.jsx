@@ -10,11 +10,10 @@ import {
   Users, Activity, Brain, TrendingUp, DollarSign,
   Cpu, CheckCircle2, XCircle, Loader2, BarChart3,
 } from 'lucide-react';
-
-const BASE = import.meta.env.VITE_API_BASE || '';
+import { BASE, authFetch } from '../../services/auth';
 
 async function fetchJSON(url) {
-  const res = await fetch(`${BASE}${url}`);
+  const res = await authFetch(`${BASE}${url}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

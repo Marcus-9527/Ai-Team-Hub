@@ -89,14 +89,22 @@ class PlanningEngine:
         if self._plan_fn:
             return await self._plan_fn(goal, context, task_id)
 
-        from backend.services.task.task_planner_driver import generate_plan
+        from backend.services.task.task_planner_driver import (
+            generate_plan,
+            PlanningError as DriverPlanningError,
+        )
         from backend.routes.maeos import _get_maeos as get_maeos
 
         maeos = await get_maeos()
-        plan = await generate_plan(
-            maeos=maeos, goal=goal,
-            task_id=task_id, context=context or {},
-        )
+        try:
+            plan = await generate_plan(
+                maeos=maeos, goal=goal,
+                task_id=task_id, context=context or {},
+            )
+        except DriverPlanningError as e:
+            # driver defines its own PlanningError; re-raise as this module's
+            # class so callers' except (PlanningError, ...) actually catches it.
+            raise PlanningError(str(e)) from e
         return plan
 
     def set_plan_fn(self, fn):

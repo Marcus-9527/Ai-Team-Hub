@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FolderKanban, FileText, GitCommit, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, Code, Terminal, ExternalLink } from 'lucide-react';
 import * as api from '../../services/api';
-
-const BASE = import.meta.env.VITE_API_BASE || '';
+import { BASE, authFetch } from '../../services/auth';
 
 const STATUS_COLORS = {
   COMPLETED: 'text-green-600 bg-green-50 border-green-200',
@@ -27,7 +26,7 @@ export default function WorkspaceExplorer() {
     setLoading(true);
     try {
       // Fetch recent tasks
-      const resp = await fetch(`${BASE}/api/tasks?limit=20`);
+      const resp = await authFetch(`${BASE}/api/tasks?limit=20`);
       const data = await resp.json();
       setTasks(data.tasks || data || []);
 

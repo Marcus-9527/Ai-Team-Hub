@@ -76,9 +76,8 @@ class CedeProtocol:
 
     Rules (in order):
       1. If teammate state is WORKING → CEDE (already busy)
-      2. If another teammate already RESPONDed to this message → CEDE (anti-redundancy)
-      3. If teammate's role doesn't match the message → consider CEDE/IGNORE
-      4. Otherwise → RESPOND
+      2. If teammate already RESPONDed to this message → CEDE (no double-reply)
+      3. Role relevance → every relevant teammate RESPONDs; off-domain → CEDE
 
     The actual LLM call to make the decision is done via a lightweight
     categorizer prompt. In the minimal implementation we use role-based rules.
@@ -107,27 +106,19 @@ class CedeProtocol:
         teammate_id = teammate.get("id", "")
         name = teammate.get("name", "?")
 
-        # Tier 1: Already responded → CEDE
+        # Tier 1: Already responded to this message → CEDE (no double-reply)
         if await self._has_responded(teammate_id, message_id):
             logger.debug("[Cede] %s already responded to msg %s — CEDE", name, message_id[:8])
             return CedeDecision.CEDE
 
-        # Tier 2: Check if another teammate already responded to this message
-        # Only one teammate should respond per round
-        if await self._is_message_claimed(message_id):
-            logger.debug("[Cede] msg %s already claimed by another teammate — CEDE for %s",
-                         message_id[:8], name)
-            return CedeDecision.CEDE
-
-        # Tier 3: Role-based relevance check
+        # Role-based relevance check. Every relevant teammate may RESPOND —
+        # there is intentionally NO cross-teammate claim guard, so all relevant
+        # teammates reply (not just the first one to grab the message).
         role_match, confidence = self._check_role_relevance(teammate, message[:200])
 
-        if confidence >= 0.7:
-            decision = CedeDecision.RESPOND if role_match else CedeDecision.IGNORE
-        elif confidence >= 0.3:
+        if confidence >= 0.3:
             decision = CedeDecision.RESPOND if role_match else CedeDecision.CEDE
         else:
-            # Low confidence → CEDE rather than over-participate
             decision = CedeDecision.CEDE
 
         logger.debug("[Cede] %s (%s) → %s (conf=%.2f)", name,
@@ -252,11 +243,6 @@ class CedeProtocol:
         records = self._records.get(message_id, [])
         return any(r.teammate_id == teammate_id for r in records)
 
-    async def _is_message_claimed(self, message_id: str) -> bool:
-        """Check if any teammate has already RESPONDed to this message."""
-        records = self._records.get(message_id, [])
-        return any(r.decision == CedeDecision.RESPOND.value for r in records)
-
     def _check_role_relevance(self, teammate: dict, message: str) -> tuple[bool, float]:
         """Check if the teammate's role is relevant to the message.
 
@@ -313,9 +299,9 @@ class CedeProtocol:
 
         is_relevant = matches >= 2 or confidence >= 0.3
 
-        # General questions (no tech keywords) → everyone could respond
+        # No keyword match → message not in this teammate's domain → CEDE
         if matches == 0:
-            return True, 0.4  # low confidence but not irrelevant
+            return False, 0.0
 
         return is_relevant, confidence
 

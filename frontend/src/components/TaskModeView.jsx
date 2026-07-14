@@ -90,12 +90,9 @@ export default function TaskModeView({ userMode = 'user' }) {
       });
       setTask(newTask);
       setSteps([]);
-      // Auto-execute in background (SSE will pick up progress)
-      try {
-        await taskApi.planTask(newTask.id);
-        await taskApi.executeTask(newTask.id);
-      } catch {}
-      // Initial fetch
+      // Backend auto-runs plan+execute in background on createTask.
+      // Do NOT call /plan or /execute here — that double-triggers the
+      // orchestrator and spawns duplicate steps that hang forever.
       loadTask(newTask.id);
     } catch (e) {
       alert(t('task.create_failed_alert') + e.message);

@@ -108,6 +108,11 @@ async def stream_ai_response(
             "stream": True,
         }
     else:
+        if not api_key:
+            raise ValueError(
+                "Missing API key for this provider. Configure a key in teammate settings "
+                "or set a workspace-level API key."
+            )
         headers["Authorization"] = f"Bearer {api_key}"
         full_messages = [{"role": "system", "content": system_prompt}] + messages
         payload = {
@@ -161,6 +166,11 @@ async def warmup_cache(
         endpoint = _get_ep(provider, base_url)
         client = _get_client()
         headers = {"Content-Type": "application/json"}
+        if not api_key:
+            raise ValueError(
+                "Missing API key for this provider. Configure a key in teammate settings "
+                "or set a workspace-level API key."
+            )
         headers["Authorization"] = f"Bearer {api_key}"
 
         payload = {

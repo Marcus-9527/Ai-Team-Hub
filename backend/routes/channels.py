@@ -134,6 +134,7 @@ async def add_teammate_to_channel(channel_id: str, teammate_id: str, db: AsyncSe
 
     channel_cache.invalidate(channel_id)
     channel_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(f"channel_teammates:{channel_id}")
     return {"ok": True, "teammate_ids": ids}
 
 

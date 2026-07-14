@@ -499,21 +499,31 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         raise HTTPException(status_code=400, detail="All teammates blocked by policy")
 
     # ── Cede Protocol: let each teammate decide whether to respond ──
-    from backend.services.autonomous.cede_protocol import get_cede_protocol
+    from backend.services.autonomous.cede_protocol import get_cede_protocol, CedeDecision
     cede = get_cede_protocol()
     cede_msg_id = user_msg_id or str(uuid.uuid4())
     ceded_teammates: list[dict] = []
     active_teammates: list[dict] = []
+    # Explicit @ → user named these teammates; they MUST respond, skip cede.
+    specified_ids = set(teammate_ids) if teammate_ids else set()
     for tm in all_teammates:
-        decision = await cede.decide(tm, content, channel_id=channel_id, message_id=cede_msg_id)
+        if tm.get("id") in specified_ids:
+            decision = CedeDecision.RESPOND
+        else:
+            decision = await cede.decide(tm, content, channel_id=channel_id, message_id=cede_msg_id)
         await cede.record_decision(tm, cede_msg_id, decision, channel_id=channel_id)
         if decision.value == "respond":
             active_teammates.append(tm)
         else:
             ceded_teammates.append(dict(tm))
     all_teammates = active_teammates
+
+    # Team-mode chit-chat with no relevant teammate: nobody responds.
+    # That's normal — return an empty success SSE instead of a 400 error.
     if not all_teammates:
-        raise HTTPException(status_code=400, detail="All teammates ceded this message")
+        async def _empty():
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(_empty(), media_type="text/event-stream")
 
     # ── Stream team collaboration response ──
     collected_events: list[dict] = []  # structured events — no SSE re-parse needed

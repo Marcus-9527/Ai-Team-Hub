@@ -60,15 +60,17 @@ async def _load_teammate(teammate_id: str) -> Optional[dict]:
             obj = res.scalar_one_or_none()
             if obj is None:
                 return None
-            d = obj.to_dict()
-            # Build chat-path shape (subsets of fields used by resolve_api_key/build_turn_prompt).
-            d.setdefault("model_provider", obj.model_provider)
-            d.setdefault("model_name", obj.model_name)
-            d.setdefault("api_key_ref", obj.api_key_ref)
-            d.setdefault("system_prompt", obj.system_prompt)
-            d.setdefault("role", obj.role)
-            d.setdefault("name", obj.name)
-            d.setdefault("id", obj.id)
+            # ponytail: Teammate has no to_dict() — build the dict inline
+            # using the fields resolve_api_key/build_turn_prompt actually need.
+            d = {
+                "id": obj.id,
+                "name": obj.name,
+                "role": obj.role,
+                "model_provider": obj.model_provider,
+                "model_name": obj.model_name,
+                "api_key_ref": obj.api_key_ref,
+                "system_prompt": obj.system_prompt,
+            }
             return d
     except Exception as e:
         logger.warning(f"[Runtime] teammate load failed for {teammate_id}: {e}")
@@ -474,13 +476,21 @@ class ExecutionRuntime:
             )
             ctx = TeammateRuntimeContext()
             if teammate is not None:
-                api_key, base_url = await resolve_api_key(teammate)
+                api_key, base_url, *_ = await resolve_api_key(teammate)
                 ctx = TeammateRuntimeContext.from_teammate(
                     teammate,
                     workspace_id=ws_id,
                     api_key=api_key or task.api_key,
                     base_url=base_url or task.base_url,
                 )
+
+                # ponytail: one guard — missing key hits the user as a clear error
+                # instead of a cryptic ValueError from deep in stream_ai_response.
+                if not ctx.api_key:
+                    raise ValueError(
+                        f"Teammate '{teammate.get('name', '?')}' has no API key. "
+                        "Set a key in teammate settings or activate a workspace key."
+                    )
 
             if ctx.is_loaded and detect_role(teammate) == "engineer":
                 # Real digital-employee loop: tools, workspace, structured output.

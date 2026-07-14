@@ -68,7 +68,7 @@ export default function ExecutionRoom() {
     if (evtSrcRef.current) { evtSrcRef.current.close(); }
     setLive(true);
     setEvents([]);
-    const src = new EventSource(`${BASE}/api/executions/${execId}/stream`);
+    const src = new EventSource(`${BASE}/api/executions/${execId}/stream` + (API_KEY ? `?api_key=${API_KEY}` : ''));
     evtSrcRef.current = src;
     src.onmessage = (e) => {
       try {

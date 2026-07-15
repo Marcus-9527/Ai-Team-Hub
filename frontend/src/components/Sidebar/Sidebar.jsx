@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, Brain, FileCheck, Zap, Activity, X } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target } from 'lucide-react';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
 import CreateChannelModal from '../Channel/CreateChannelModal';
@@ -7,19 +7,17 @@ import CreateTeammateModal from '../Teammate/CreateTeammateModal';
 import ConfirmDialog from '../ConfirmDialog';
 
 const NAV_ITEMS = [
-  { view: 'new-topic',  icon: MessageSquare, key: 'sidebar.new_topic' },
-  { view: 'home',  icon: Inbox,         key: 'nav.inbox' },
-  { view: 'tasks', icon: ListTodo,      key: 'nav.tasks' },
-  { view: 'team',  icon: Users,         key: 'sidebar.ai_teammates' },
-  { view: 'brain', icon: Brain,         key: 'nav.brain' },
-  { view: 'proposals', icon: FileCheck, key: 'nav.proposals' },
-  { view: 'autonomous', icon: Zap,      key: 'nav.autonomous' },
-  { view: 'system-health', icon: Activity, key: 'nav.system_health' },
+  { view: 'new-topic', icon: Target,       label: '工作区' },
+  { view: 'inbox',     icon: Inbox,         label: '收件箱' },
+  { view: 'tasks',     icon: ListTodo,      label: '任务' },
+  { view: 'team',      icon: Users,         label: '团队' },
+  { view: 'brain',     icon: BrainCircuit,  label: '知识库' },
+  { view: 'ai-ops',    icon: Zap,           label: '自动化' },
 ];
 
 export default function Sidebar({
   activeView, onNavigate, showSettings, onOpenSettings,
-  channelId, onChannelSelect, showDashboard,
+  channelId, onChannelSelect,
 }) {
   const t = useTranslation();
   const [channels, setChannels] = useState([]);
@@ -83,7 +81,7 @@ export default function Sidebar({
 
       {/* Main Nav */}
       <div className="py-2 px-2 space-y-0.5">
-        {NAV_ITEMS.map(({ view, icon: Icon, key }) => (
+        {NAV_ITEMS.map(({ view, icon: Icon, label }) => (
           <button
             key={view}
             onClick={() => onNavigate(view)}
@@ -94,7 +92,7 @@ export default function Sidebar({
             }`}
           >
             <Icon size={16} className="flex-shrink-0 opacity-70" />
-            <span>{t(key)}</span>
+            <span>{label}</span>
           </button>
         ))}
       </div>

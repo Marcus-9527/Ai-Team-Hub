@@ -61,6 +61,9 @@ from backend.services.task.task_hooks import (
     get_task_hook_registry,
 )
 
+# Phase 27: TaskRun / DAG models for run and visualization endpoints
+from backend.models import TaskRunModel, TaskStepModel, DAGDefinitionModel
+
 logger = logging.getLogger("routes.tasks")
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -378,22 +381,6 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)
         await registry.dispatch(TaskLifecycleEvent.TASK_CREATED, ctx)
     except Exception as e:
         logger.debug(f"[ROUTES] TASK_CREATED dispatch failed (non-fatal): {e}")
-
-    # ── Step 1: fire TASK_CREATED on the wakeup bus (claim competition) ──
-    # Coexists with _background_orchestrate below; handler only competes for
-    # the claim, does not enter the execution layer yet.
-    try:
-        from backend.services.autonomous.event_wakeup import (
-            get_event_wakeup_bus, WakeupEvent, WakeupPayload,
-        )
-        get_event_wakeup_bus().fire(WakeupEvent.TASK_CREATED, WakeupPayload(
-            event_type=WakeupEvent.TASK_CREATED.value,
-            task_id=task.id,
-            channel_id=task.channel_id or "",
-            reason="task created via API",
-        ))
-    except Exception as e:
-        logger.debug(f"[ROUTES] TASK_CREATED wakeup fire failed (non-fatal): {e}")
 
     # ── Background orchestration: plan → execute (no blocking) ──
     goal = req.intent or req.title or req.description
@@ -1736,5 +1723,149 @@ def _plan_review_to_response(review) -> PlanReviewResponse:
         reviewer=review.reviewer or "",
         comment=review.comment or "",
         created_at=review.created_at.isoformat() if review.created_at else None,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 27: TaskRun endpoints
+# ═══════════════════════════════════════════════════════════════
+
+
+class TaskRunResponse(BaseModel):
+    id: str
+    task_id: str
+    run_number: int
+    status: str
+    started_at: Optional[str]
+    completed_at: Optional[str]
+    error: str
+    summary: str
+    created_at: Optional[str]
+
+
+@router.get("/{task_id}/runs", response_model=list[TaskRunResponse])
+async def list_task_runs(
+    task_id: str,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """List TaskRuns for a task, newest first."""
+    mgr = _get_manager()
+    task = await mgr.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    stmt = (
+        sa.select(TaskRunModel)
+        .where(TaskRunModel.task_id == task_id)
+        .order_by(TaskRunModel.run_number.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    runs = result.scalars().all()
+    return [_run_to_response(r) for r in runs]
+
+
+@router.get("/{task_id}/runs/{run_id}")
+async def get_task_run_detail(
+    task_id: str,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a TaskRun with its associated steps and execution records."""
+    mgr = _get_manager()
+    task = await mgr.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    run = await db.get(TaskRunModel, run_id)
+    if not run or run.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Fetch steps for this run
+    stmt = (
+        sa.select(TaskStepModel)
+        .where(TaskStepModel.run_id == run_id)
+        .order_by(TaskStepModel.order)
+    )
+    result = await db.execute(stmt)
+    steps = result.scalars().all()
+
+    # Fetch execution records for this run's steps
+    step_ids = [s.id for s in steps] if steps else []
+    execs = []
+    if step_ids:
+        from backend.models import TaskExecutionModel
+        stmt2 = (
+            sa.select(TaskExecutionModel)
+            .where(TaskExecutionModel.task_step_id.in_(step_ids))
+            .order_by(TaskExecutionModel.attempt)
+        )
+        result2 = await db.execute(stmt2)
+        execs = result2.scalars().all()
+
+    # Fetch DAG for this run (first active dag for the task)
+    dag = None
+    dags_stmt = (
+        sa.select(DAGDefinitionModel)
+        .order_by(DAGDefinitionModel.created_at.desc())
+        .limit(1)
+    )
+    dag_result = await db.execute(dags_stmt)
+    dag = dag_result.scalar_one_or_none()
+
+    return {
+        **(_run_to_response(run).model_dump()),
+        "steps": [s.to_dict() for s in steps],
+        "executions": [e.to_dict() for e in execs],
+        "dag": dag.to_dict() if dag else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 27: DAG visualization endpoint
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/{task_id}/dag")
+async def get_task_dag(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the active DAG definition and nodes for this task."""
+    mgr = _get_manager()
+    task = await mgr.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    dags_stmt = (
+        sa.select(DAGDefinitionModel)
+        .order_by(DAGDefinitionModel.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(dags_stmt)
+    dag = result.scalar_one_or_none()
+    if not dag:
+        return {"dag": None, "nodes": []}
+
+    return {
+        "dag": dag.to_dict(),
+        "nodes": [n.to_dict() for n in (dag.nodes or [])],
+    }
+
+
+def _run_to_response(run: TaskRunModel) -> TaskRunResponse:
+    return TaskRunResponse(
+        id=run.id,
+        task_id=run.task_id,
+        run_number=run.run_number,
+        status=run.status,
+        started_at=run.started_at.isoformat() if run.started_at else None,
+        completed_at=run.completed_at.isoformat() if run.completed_at else None,
+        error=run.error or "",
+        summary=run.summary or "",
+        created_at=run.created_at.isoformat() if run.created_at else None,
     )
 

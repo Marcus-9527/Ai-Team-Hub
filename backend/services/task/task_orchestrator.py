@@ -13,6 +13,7 @@ returns immediately (no wait for LLM).
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models import (
     TaskModel, TaskStatus, TaskStepModel,
     DAGDefinitionModel, DAGNodeModel,
+    TaskRunModel, TaskRunStatus,
 )
 from backend.services.task.task_manager import TaskManager
 from backend.services.task.task_executor import TaskExecutor
@@ -94,6 +96,9 @@ class TaskOrchestrator:
             # 1.5 TechLead review (Phase 25) — analysis, risk, teammate recs
             await self._techlead_review(db, task, dag, goal)
 
+            # Phase 27: Create TaskRun for this execution cycle
+            task_run = await self._create_run(db, task)
+
             # 2. Assign teammates first (modifies dag.nodes in-memory)
             await self._assign_and_save(db, task, dag)
             _sse_event("team_created", task_id, {
@@ -128,7 +133,7 @@ class TaskOrchestrator:
             await db.commit()
 
             # 4. Create TaskSteps & transition to ASSIGNED
-            task = await self._create_steps(db, task_id, dag)
+            task = await self._create_steps(db, task_id, dag, task_run.id)
             task = await self._manager.start_assigned(db, task.id)
             await db.commit()
 
@@ -178,6 +183,15 @@ class TaskOrchestrator:
                 except Exception as e:
                     logger.warning("[ORCH] review_relay failed for %s: %s", task_id[:8], e)
 
+            # Phase 27: Finalize TaskRun
+            try:
+                task_run = await db.get(TaskRunModel, task.current_run_id)
+                if task_run:
+                    self._finalize_run(task, task_run)
+                    await db.flush()
+            except Exception:
+                pass
+
             return task
         except Exception as e:
             logger.error("[ORCH] start_task %s failed: %s", task_id[:8], e)
@@ -190,6 +204,15 @@ class TaskOrchestrator:
                 if task and task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
                     task = await self._manager.fail(db, task_id)
                     await db.flush()
+                # Phase 27: Finalize TaskRun on error
+                run_id = getattr(task, 'current_run_id', None)
+                if run_id:
+                    task_run = await db.get(TaskRunModel, run_id)
+                    if task_run:
+                        task_run.status = TaskRunStatus.FAILED
+                        task_run.completed_at = datetime.now(timezone.utc)
+                        task_run.error = str(e)[:2000]
+                        await db.flush()
             except Exception:
                 pass
             return task
@@ -408,7 +431,7 @@ class TaskOrchestrator:
             confidence=0.8,
         )
 
-    async def _create_steps(self, db: AsyncSession, task_id: str, dag):
+    async def _create_steps(self, db: AsyncSession, task_id: str, dag, run_id: str = ""):
         """Create TaskStep records from DAG nodes, carrying DAG deps as step deps."""
         node_to_step: dict[str, str] = {}
         for i, node in enumerate(dag.nodes.values()):
@@ -417,6 +440,9 @@ class TaskOrchestrator:
                 db, task_id=task_id, order=i + 1,
                 objective=node.description, teammate_id=teammate_id,
             )
+            # Phase 27: associate step with run
+            if run_id:
+                step.run_id = run_id
             node_to_step[node.id] = step.id
         # Resolve DAG node deps → step deps.
         all_steps = await self._manager.state.list_steps(db, task_id)
@@ -774,6 +800,51 @@ class TaskOrchestrator:
         res = await db.execute(select(Teammate).where(Teammate.id == teammate_id))
         obj = res.scalar_one_or_none()
         return type("T", (), obj.to_dict())() if obj else None
+
+
+    # ── Phase 27: TaskRun lifecycle ──
+
+    async def _create_run(self, db: AsyncSession, task: TaskModel) -> TaskRunModel:
+        """Create a new TaskRun and link it to the task."""
+        from sqlalchemy import select, func
+        result = await db.execute(
+            select(func.max(TaskRunModel.run_number)).where(
+                TaskRunModel.task_id == task.id
+            )
+        )
+        max_run = result.scalar() or 0
+        task_run = TaskRunModel(
+            task_id=task.id,
+            run_number=max_run + 1,
+            status=TaskRunStatus.PENDING,
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(task_run)
+        await db.flush()
+        task.current_run_id = task_run.id
+        await db.flush()
+        _sse_event("run_created", task.id, {
+            "run_id": task_run.id,
+            "run_number": task_run.run_number,
+        })
+        return task_run
+
+    def _finalize_run(self, task: TaskModel, task_run: TaskRunModel) -> None:
+        """Update TaskRun status based on task outcome."""
+        task_run.completed_at = datetime.now(timezone.utc)
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            task_run.status = (
+                TaskRunStatus.COMPLETED
+                if task.status == TaskStatus.COMPLETED
+                else TaskRunStatus.FAILED
+            )
+        if task.error:
+            task_run.error = task.error[:2000]
+
+
+def _utc_timestamp() -> datetime:
+    """ISO-8601 timestamp for log messages."""
+    return datetime.now(timezone.utc)
 
 
 def db_session_factory():

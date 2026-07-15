@@ -153,3 +153,14 @@ export const getTaskPolicy = (taskId) =>
 
 export const updateTaskPolicy = (taskId, data) =>
   request(`/api/tasks/${taskId}/policy`, { method: 'PUT', body: JSON.stringify(data) });
+
+// ── Phase 27: DAG & Runs ──
+
+export const getTaskDag = (taskId) =>
+  request(`/api/tasks/${taskId}/dag`);
+
+export const listTaskRuns = (taskId) =>
+  request(`/api/tasks/${taskId}/runs`);
+
+export const getTaskRunDetail = (taskId, runId) =>
+  request(`/api/tasks/${taskId}/runs/${runId}`);

@@ -58,7 +58,7 @@ function GoalInput({ onSubmit, loading }) {
 }
 
 /* ── TaskModeView: main export ── */
-export default function TaskModeView({ userMode = 'user' }) {
+export default function TaskModeView() {
   const t = useTranslation();
   const [task, setTask] = useState(null);
   const [steps, setSteps] = useState([]);
@@ -130,7 +130,6 @@ export default function TaskModeView({ userMode = 'user' }) {
           task={task}
           steps={steps}
           loading={loading}
-          userMode={userMode}
           onBack={() => setTask(null)}
           onRefresh={() => loadTask(task.id)}
           onViewAdvanced={() => setShowAdvanced(true)}

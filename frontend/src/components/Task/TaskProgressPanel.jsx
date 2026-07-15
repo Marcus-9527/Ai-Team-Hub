@@ -39,7 +39,7 @@ const STATUS = {
 const PENDING = { label: '待处理', color: 'text-gray-500', bg: 'bg-gray-100', dot: 'bg-gray-400' };
 
 export default function TaskProgressPanel({
-  task, steps, loading, userMode = 'user',
+  task, steps, loading,
   onBack, onRefresh, onViewAdvanced,
 }) {
   const sc = STATUS[task?.status] || PENDING;

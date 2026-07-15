@@ -121,6 +121,7 @@ class Message(Base):
 # RAG System Models
 # ═══════════════════════════════════════════════════════════
 
+
 class FileUpload(Base):
     __tablename__ = "file_uploads"
 
@@ -156,6 +157,7 @@ class FileChunk(Base):
 # ═══════════════════════════════════════════════════════════
 # Attachment Context (immutable, versioned, shared)
 # ═══════════════════════════════════════════════════════════
+
 
 class AttachmentContextModel(Base):
     """
@@ -292,6 +294,9 @@ class TaskModel(Base):
     replan_decisions = Column(JSON, default=list)     # list of replan records
     replan_count = Column(Integer, default=0)         # how many replans happened
 
+    # ── Phase 27: Current active run ──
+    current_run_id = Column(String, nullable=True, index=True)  # points to active TaskRunModel
+
     # ── DAG hierarchy: parent_task / child_task / dependency ──
     parent_task_id = Column(String, ForeignKey("tasks.id"), nullable=True, index=True)
     child_task_ids = Column(JSON, default=list)
@@ -334,6 +339,7 @@ class TaskModel(Base):
             "test_result": self.test_result or "",
             "review_comments": self.review_comments or "",
             "review_rounds": self.review_rounds or 0,
+            "current_run_id": self.current_run_id,
             "techlead_decision": self.techlead_decision,
             "techlead_summary": self.techlead_summary or "",
             "replan_decisions": self.replan_decisions or [],
@@ -382,6 +388,9 @@ class TaskStepModel(Base):
     # v2.6 Phase C: Step origin tracking
     source = Column(String, default="MANUAL")  # MANUAL | PLANNER | SYSTEM
 
+    # Phase 27: Run grouping
+    run_id = Column(String, nullable=True, index=True)  # task_runs.id
+
     created_at = Column(DateTime, default=utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
@@ -409,6 +418,7 @@ class TaskStepModel(Base):
             "error": self.error,
             "retry_count": self.retry_count,
             "source": self.source,
+            "run_id": self.run_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -598,9 +608,6 @@ class TaskPolicyModel(Base):
 
 
 # ═══════════════════════════════════════════════════════════════
-# Phase 16: Policy Rule Model (Tool Action Gate)
-# ═══════════════════════════════════════════════════════════════
-
 
 class PolicyEffect:
     ALLOW = "allow"
@@ -1134,5 +1141,61 @@ class PolicyDecisionModel(Base):
             "workspace_id": self.workspace_id,
             "channel_id": self.channel_id,
             "context": self.context_json if isinstance(self.context_json, dict) else {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 27: TaskRun — groups one execution cycle of a Task
+# ═══════════════════════════════════════════════════════════════
+
+
+class TaskRunStatus:
+    """TaskRun lifecycle states."""
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+    CHOICES = [PENDING, RUNNING, COMPLETED, FAILED]
+
+
+class TaskRunModel(Base):
+    """
+    One execution run of a Task.
+
+    A task can be executed multiple times (replan, retry). Each
+    invocation creates a TaskRun that groups all steps and execution
+    records produced during that cycle.
+    """
+    __tablename__ = "task_runs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    task_id = Column(
+        String,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_number = Column(SAInteger, default=1)    # auto-increment per task
+    status = Column(String, default=TaskRunStatus.PENDING, index=True)
+
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    error = Column(Text, default="")
+    summary = Column(Text, default="")
+
+    created_at = Column(DateTime, default=utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "run_number": self.run_number,
+            "status": self.status,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "error": self.error,
+            "summary": self.summary,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

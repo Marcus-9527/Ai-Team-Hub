@@ -9,16 +9,14 @@ import { listChannels } from './services/api';
 // 非首屏视图懒加载,拆分到各自的 chunk
 const NewTopicPage = lazy(() => import('./components/NewTopic/NewTopicPage'));
 const TaskModeView = lazy(() => import('./components/TaskModeView'));
-const HomePage = lazy(() => import('./components/Home/HomePage'));
 const ProjectsPage = lazy(() => import('./components/Projects/ProjectsPage'));
 const TeamPage = lazy(() => import('./components/Team/TeamPage'));
 const DashboardPage = lazy(() => import('./components/Dashboard/DashboardPage'));
 const InboxPage = lazy(() => import('./components/Inbox/InboxPage'));
-const DeveloperCenter = lazy(() => import('./components/Developer/DeveloperCenter'));
 const BrainPage = lazy(() => import('./components/Brain/BrainPage'));
 const ProposalApprovalPage = lazy(() => import('./components/Brain/ProposalApprovalPage'));
 const ApprovalQueuePage = lazy(() => import('./components/Approval/ApprovalQueuePage'));
-const AutonomousCenter = lazy(() => import('./components/Autonomous/AutonomousCenter'));
+const AutonomousCenter = lazy(() => import('./components/Autonomous/AIOpsCenter'));
 const ExecutionRoom = lazy(() => import('./components/Execution/ExecutionRoom'));
 const WorkspaceExplorer = lazy(() => import('./components/Workspace/WorkspaceExplorer'));
 const SystemHealthView = lazy(() => import('./components/SystemHealth/SystemHealth'));
@@ -28,14 +26,7 @@ function ViewFallback() {
 }
 
 export default function AppShell({ onNavigateToLanding }) {
-  const [view, setView] = useState('home');
-  const [userMode, setUserMode] = useState(
-    () => localStorage.getItem('aihub_user_mode') || 'user'
-  );
-  const setUserModePersist = useCallback((m) => {
-    setUserMode(m);
-    localStorage.setItem('aihub_user_mode', m);
-  }, []);
+  const [view, setView] = useState('inbox');
   const [channelId, setChannelId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -84,8 +75,7 @@ export default function AppShell({ onNavigateToLanding }) {
       triggerRefresh,
       lang,
       changeLang,
-      userMode,
-      setUserMode: setUserModePersist,
+      onNavigate: handleNavigate,
     };
   } else if (view === 'chat') {
     viewKey = 'chat-' + (channelId || 'empty') + '-' + refreshKey;
@@ -105,7 +95,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'tasks') {
     viewKey = 'tasks-' + refreshKey;
     ViewComponent = TaskModeView;
-    viewProps = { userMode };
+    viewProps = {};
   } else if (view === 'projects') {
     viewKey = 'projects-' + refreshKey;
     ViewComponent = ProjectsPage;
@@ -120,8 +110,8 @@ export default function AppShell({ onNavigateToLanding }) {
     viewProps = { lang };
   } else if (view === 'dashboard') {
     viewKey = 'dashboard-' + refreshKey;
-    ViewComponent = userMode === 'developer' ? DeveloperCenter : DashboardPage;
-    viewProps = { onBack: () => setView('home') };
+    ViewComponent = DashboardPage;
+    viewProps = { onBack: () => setView('inbox') };
   } else if (view === 'brain') {
     viewKey = 'brain-' + refreshKey;
     ViewComponent = BrainPage;
@@ -133,9 +123,13 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'approvals') {
     viewKey = 'approvals-' + refreshKey;
     ViewComponent = ApprovalQueuePage;
-    viewProps = { onBack: () => setView('home') };
+    viewProps = { onBack: () => setView('inbox') };
   } else if (view === 'autonomous') {
     viewKey = 'autonomous-' + refreshKey;
+    ViewComponent = AutonomousCenter;
+    viewProps = {};
+  } else if (view === 'ai-ops') {
+    viewKey = 'ai-ops-' + refreshKey;
     ViewComponent = AutonomousCenter;
     viewProps = {};
   } else if (view === 'execution') {
@@ -151,15 +145,9 @@ export default function AppShell({ onNavigateToLanding }) {
     ViewComponent = SystemHealthView;
     viewProps = {};
   } else {
-    viewKey = 'home-' + refreshKey;
-    ViewComponent = HomePage;
-    viewProps = {
-      onNavigate: handleNavigate,
-      triggerRefresh,
-      refreshKey,
-      lang,
-      userMode,
-    };
+    viewKey = 'inbox-' + refreshKey;
+    ViewComponent = InboxPage;
+    viewProps = { onNavigate: handleNavigate };
   }
 
   return (
@@ -171,7 +159,6 @@ export default function AppShell({ onNavigateToLanding }) {
         showSettings={showSettings}
         channelId={channelId}
         onChannelSelect={handleChannelSelect}
-        showDashboard={userMode === 'developer'}
       />
       <div className="flex-1 flex flex-col min-w-0 relative">
         <AnimatePresence mode="sync">

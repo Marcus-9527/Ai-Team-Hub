@@ -12,24 +12,32 @@ from backend.services.autonomous.event_wakeup import (
 )
 from backend.services.autonomous.task_claim_subscriber import handle_task_created
 from backend.services.autonomous.teammate_state import (
-    get_state_manager, TeammateState,
+    get_state_manager, TeammateState, TeammateRuntimeState,
 )
 from backend.services.autonomous.task_claim import get_claim_manager
+
+
+@pytest.fixture(autouse=True)
+def reset_singletons():
+    cm = get_claim_manager()
+    cm._claims = {}
+    cm._owners = {}
+    get_state_manager()._states = {}
+    yield
+    cm._claims = {}
+    cm._owners = {}
+    get_state_manager()._states = {}
 
 
 @pytest.mark.asyncio
 async def test_task_created_fires_claim_race():
     bus = get_event_wakeup_bus()
     bus.reset()
-    claim_mgr = get_claim_manager()
-    claim_mgr.clear = lambda *a, **k: None  # in-memory only
     sm = get_state_manager()
 
-    # Register N available teammates (in-memory; no DB needed)
     n = 3
     for i in range(n):
-        tid = f"tm_{i}"
-        await sm.set_active(tid)
+        await sm.set_active(f"tm_{i}")
 
     bus.subscribe(WakeupEvent.TASK_CREATED, handle_task_created)
     task_id = "task_race_1"
@@ -37,15 +45,13 @@ async def test_task_created_fires_claim_race():
         event_type=WakeupEvent.TASK_CREATED.value, task_id=task_id,
     ))
 
-    # handler + claim persistence run as fire-and-forget futures
     import asyncio
     for _ in range(20):
         await asyncio.sleep(0)
     await asyncio.sleep(0.05)
 
-    claims = await claim_mgr.get_claims(task_id)
+    claims = await get_claim_manager().get_claims(task_id)
     assert len(claims) == n, f"expected {n} claim attempts, got {len(claims)}"
-    # exactly one winner
     winners = [c for c in claims if c.status == "claimed"]
     assert len(winners) == 1
 
@@ -55,8 +61,6 @@ async def test_task_created_no_candidates_is_noop():
     bus = get_event_wakeup_bus()
     bus.reset()
     sm = get_state_manager()
-    # wipe available teammates: only offline ones present
-    from backend.services.autonomous.teammate_state import TeammateRuntimeState
     sm._states = {"off": TeammateRuntimeState("off")}
     await sm.set_offline("off")
 

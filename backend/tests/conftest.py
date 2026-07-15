@@ -36,6 +36,16 @@ async def db_session():
     # Create a session
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     session = session_factory()
+    # ponytail: in-memory singletons (claim manager + teammate state) are NOT
+    # torn down by the DB rollback above. Reset them so each test starts with
+    # no stray claims / available teammates — otherwise a teammate registered
+    # by one test silently assigns nodes in another (breaks fail-fast, etc.).
+    from backend.services.autonomous.task_claim import get_claim_manager
+    from backend.services.autonomous.teammate_state import get_state_manager
+    cm = get_claim_manager()
+    cm._claims = {}
+    cm._owners = {}
+    get_state_manager()._states = {}
     try:
         yield session
     finally:

@@ -315,10 +315,37 @@ class TaskOrchestrator:
                     logger.info("[ORCH] TL rec '%s' for step %d not found — fallback",
                                 r.get("teammate"), step_idx)
 
+        # C: await the TASK_CREATED claim competition here, before assigning.
+        # ponytail: the wakeup handler only *triggers* it (fire-and-forget);
+        # we await the same helper so we don't bet on which background task
+        # reaches claim() first. Execution still runs exactly once via
+        # _background_orchestrate.
+        from backend.services.autonomous.task_claim_subscriber import (
+            run_claim_competition,
+        )
+        await run_claim_competition(task_id)
+
+        from backend.services.autonomous.task_claim import get_claim_manager
+        claim_mgr = get_claim_manager()
+
         for i, node in enumerate(dag.nodes.values()):
             if node.selected_teammate_id or node.teammate:
                 continue
             try:
+                # A: honor an existing claim for this task before the selector.
+                # ponytail: claim is per-task (not per-node); first claimant
+                # wins the whole task. If a teammate already holds the claim,
+                # pin every unassigned node to them and skip selector/self-claim.
+                claims = await claim_mgr.get_claims(task_id)
+                claimed = [c for c in claims if c.status == "claimed"]
+                if claimed:
+                    owner = claimed[0].teammate_id
+                    logger.info("[ORCH] existing claim on %s → owner %s",
+                                task_id[:8], owner[:8])
+                    node.selected_teammate_id = owner
+                    node.teammate = owner
+                    continue
+
                 # Phase 26: check TechLead recommendation for this step
                 tl_rec_id = tl_map.get(i + 1)
 

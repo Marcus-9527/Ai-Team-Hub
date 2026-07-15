@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Clock, CheckCircle2, XCircle, Loader2, Radio, ChevronRight, Expand, Minimize } from 'lucide-react';
 import * as api from '../../services/api';
-
+import { getToken } from '../../services/auth';
 const BASE = import.meta.env.VITE_API_BASE || '';
 
 const STATUS_COLORS = {
@@ -68,7 +68,7 @@ export default function ExecutionRoom() {
     if (evtSrcRef.current) { evtSrcRef.current.close(); }
     setLive(true);
     setEvents([]);
-    const src = new EventSource(`${BASE}/api/executions/${execId}/stream` + (API_KEY ? `?api_key=${API_KEY}` : ''));
+    const src = new EventSource(`${BASE}/api/executions/${execId}/stream` + (getToken() ? `?token=${getToken()}` : ''));
     evtSrcRef.current = src;
     src.onmessage = (e) => {
       try {

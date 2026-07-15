@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Users, Loader2, Cpu, GitBranch, UserPlus, Rocket, CheckCircle2 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
+import { getToken } from '../../services/auth';
 import { dispatchTaskEvent, subscribeTaskEvents } from '../../services/taskEventBus';
 import TeamPanel from './TeamPanel';
 
@@ -49,8 +50,8 @@ export default function TaskProgressPanel({
   useEffect(() => {
     if (!task?.id) return;
     const BASE = import.meta.env.VITE_API_BASE || '';
-    const API_KEY = import.meta.env.VITE_API_KEY || '';
-    const url = `${BASE}/api/tasks/${task.id}/events` + (API_KEY ? `?api_key=${API_KEY}` : '');
+    const token = getToken();
+    const url = `${BASE}/api/tasks/${task.id}/events` + (token ? `?token=${token}` : '');
     const es = new EventSource(url);
     sseRef.current = es;
 

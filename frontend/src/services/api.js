@@ -1,7 +1,7 @@
 /**
  * API client for AI Team Hub backend.
  */
-import { BASE, authHeaders, API_KEY } from './auth';
+import { BASE, authHeaders, getToken } from './auth';
 import { toast } from './toast';
 
 const TIMEOUT_MS = 15000;
@@ -36,6 +36,13 @@ async function request(url, options = {}) {
   return res.json();
 }
 
+// ── Auth ──
+export const register = (email, password, displayName = '') =>
+  request('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password, display_name: displayName }) });
+export const login = (email, password) =>
+  request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const authMe = () => request('/api/auth/me');
+
 // ── Health ──
 export const healthCheck = () => request('/api/health');
 
@@ -55,7 +62,7 @@ export const sendMessage = (channelId, content, authorName = 'You', teammateIds 
   }
   return fetch(`${BASE}/api/messages/${channelId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(getToken() ? { 'Authorization': `Bearer ${getToken()}` } : {}) },
     body: JSON.stringify(body),
   });
 };
@@ -67,7 +74,7 @@ export const uploadFileMsg = (channelId, file, authorName = 'You') => {
   return fetch(`${BASE}/api/messages/${channelId}/file`, {
     method: 'POST',
     body: form,
-    headers: API_KEY ? { 'X-API-Key': API_KEY, 'X-Author-Name': authorName } : { 'X-Author-Name': authorName },
+    headers: getToken() ? { 'Authorization': `Bearer ${getToken()}`, 'X-Author-Name': authorName } : { 'X-Author-Name': authorName },
   });
 };
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target, Bot } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target, Bot, LogOut } from 'lucide-react';
+import { clearSession } from '../../services/auth';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
 import CreateChannelModal from '../Channel/CreateChannelModal';
@@ -218,7 +219,7 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Settings */}
+      {/* Settings + Logout */}
       <div className="border-t border-[#e2ddd7] px-2 py-2">
         <button
           onClick={onOpenSettings}
@@ -228,6 +229,13 @@ export default function Sidebar({
         >
           <Settings size={16} className="flex-shrink-0 opacity-70" />
           <span>{t('sidebar.settings')}</span>
+        </button>
+        <button
+          onClick={() => { clearSession(); onNavigateToLanding?.(); }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-[#5c5c5c] hover:bg-white/60 hover:text-[#1d1d1d] transition-all"
+        >
+          <LogOut size={16} className="flex-shrink-0 opacity-70" />
+          <span>退出登录</span>
         </button>
       </div>
       {showCreate && (

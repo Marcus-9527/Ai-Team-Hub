@@ -17,6 +17,8 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from backend.services.auth_service import decode_token
+
 logger = logging.getLogger("auth")
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -179,14 +181,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # Gate /api/* and /v1/* behind the master API key.
-        # Default: LOCKED. A missing/explicitly-disabled key no longer opens the
-        # gate (that was the "all data exposed" bug — a pre-key process stayed
-        # open forever). Set AI_TEAM_HUB_AUTH_DISABLED=1 to opt out (dev only).
-        if request.url.path.startswith("/v1") or request.url.path.startswith("/api"):
+        path = request.url.path
+
+        # ── Auth endpoints: open (registration/login/me) ──
+        if path.startswith("/api/auth"):
+            request.state.workspace_id = None
+            return await call_next(request)
+
+        # ── Public API v1: master API key only (SDK) ──
+        if path.startswith("/v1"):
             expected = get_api_key()
             if os.environ.get("AI_TEAM_HUB_AUTH_DISABLED", "").strip() == "1":
-                # Explicit dev opt-out — never the default.
                 request.state.tenant_id = "default"
                 request.state.api_key = "dev-disabled"
                 return await call_next(request)
@@ -196,11 +201,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     content={"detail": "API key not configured; set AI_TEAM_HUB_API_KEY"},
                 )
             api_key = request.headers.get("X-API-Key", "")
-            if not api_key:
-                auth = request.headers.get("Authorization", "")
-                if auth.startswith("Bearer "):
-                    api_key = auth[7:]
-            # EventSource (SSE) can't send custom headers — allow key via query.
+            if not api_key and (auth := request.headers.get("Authorization", "")).startswith("Bearer "):
+                api_key = auth[7:]
             if not api_key:
                 api_key = request.query_params.get("api_key", "")
             if not api_key or api_key != expected:
@@ -210,16 +212,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             request.state.tenant_id = "default"
             request.state.api_key = api_key
+            request.state.workspace_id = None
+            return await call_next(request)
 
-            # Sliding-window rate limit per (key, IP). SSE/streaming and normal
-            # browsing stay well under 120/min; a brute-forcer or quota abuser
-            # trips it. 429 keeps a leaked key from burning the model budget.
-            client_ip = request.client.host if request.client else "noip"
-            if _rate_limited(f"{api_key}:{client_ip}"):
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Rate limit exceeded; slow down"},
-                )
+        # ── App API: JWT Bearer, fall back to master key for legacy/SDK ──
+        if path.startswith("/api"):
+            auth = request.headers.get("Authorization", "")
+            token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+            if not token:
+                # EventSource (SSE) can't send headers — allow token via query
+                token = request.query_params.get("token", "")
+            claims = decode_token(token) if token else None
+            if claims:
+                request.state.user_id = claims.get("sub")
+                request.state.workspace_id = claims.get("ws")
+                request.state.tenant_id = "default"
+                request.state.api_key = "jwt"
+                return await call_next(request)
+            # Fallback: master API key (legacy frontend, SSE, scripts)
+            expected = get_api_key()
+            if os.environ.get("AI_TEAM_HUB_AUTH_DISABLED", "").strip() == "1":
+                request.state.tenant_id = "default"
+                request.state.api_key = "dev-disabled"
+                request.state.workspace_id = None
+                return await call_next(request)
+            if expected is not None:
+                api_key = request.headers.get("X-API-Key", "")
+                if not api_key:
+                    api_key = request.query_params.get("api_key", "")
+                if api_key and api_key == expected:
+                    request.state.tenant_id = "default"
+                    request.state.api_key = api_key
+                    request.state.workspace_id = None
+                    return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid Authorization token"},
+            )
 
         response = await call_next(request)
         req_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
@@ -235,3 +264,8 @@ async def validate_api_key(api_key: str) -> str:
     default tenant so a misconfigured caller never hard-fails.
     """
     return "default"
+
+
+def ws_id_of(request: Request) -> str | None:
+    """Current caller's workspace_id, or None if unauthenticated/legacy-master."""
+    return getattr(request.state, "workspace_id", None)

@@ -1,7 +1,7 @@
 """
 Teammate CRUD routes with caching.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +9,7 @@ from backend.database import get_db, async_session
 from backend.models import Teammate, TaskExecutionModel
 from backend.cache import teammate_cache
 from backend.services.cache_warmup_service import invalidate_warmup
-from backend.middleware.auth import require_admin
+from backend.middleware.auth import require_admin, ws_id_of
 from backend.services.memory.memory_service import get_memory_service
 from backend.services.autonomous.teammate_state import get_state_manager
 from backend.services.brain.fragment_store import get_brain_fragment_store
@@ -38,13 +38,17 @@ def _serialize_teammate(t: Teammate) -> dict:
 
 
 @router.get("")
-async def list_teammates(db: AsyncSession = Depends(get_db)):
+async def list_teammates(request: Request, db: AsyncSession = Depends(get_db)):
     # Try cache first
     cached = teammate_cache.get(LIST_KEY)
     if cached is not None:
         return cached
 
-    result = await db.execute(select(Teammate).order_by(Teammate.created_at))
+    ws = ws_id_of(request)
+    q = select(Teammate).order_by(Teammate.created_at)
+    if ws:
+        q = q.where(Teammate.workspace_id == ws)
+    result = await db.execute(q)
     teammates = result.scalars().all()
     data = [_serialize_teammate(t) for t in teammates]
 
@@ -57,7 +61,8 @@ async def list_teammates(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", dependencies=[Depends(require_admin)])
-async def create_teammate(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_teammate(data: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    ws = ws_id_of(request)
     teammate = Teammate(
         name=data.get("name") or data.get("role") or "AI 队友",
         role=data.get("role", "assistant"),
@@ -66,6 +71,7 @@ async def create_teammate(data: dict, db: AsyncSession = Depends(get_db)):
         model_provider=data["model_provider"],
         model_name=data["model_name"],
         api_key_ref=data.get("api_key_ref"),
+        workspace_id=ws or data.get("workspace_id"),
         skills=data.get("skills", []),
         capabilities=data.get("capabilities", []),
     )

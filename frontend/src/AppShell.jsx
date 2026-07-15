@@ -161,6 +161,7 @@ export default function AppShell({ onNavigateToLanding }) {
         showSettings={showSettings}
         channelId={channelId}
         onChannelSelect={handleChannelSelect}
+        onNavigateToLanding={onNavigateToLanding}
       />
       <div className="flex-1 flex flex-col min-w-0 relative">
         <AnimatePresence mode="sync">

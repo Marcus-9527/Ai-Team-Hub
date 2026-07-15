@@ -4,7 +4,7 @@ SQLAlchemy models for AI Team Hub.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float, Integer, UniqueConstraint
 from sqlalchemy.orm import relationship, backref
 
 from backend.database import Base
@@ -18,12 +18,45 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    avatar_color = Column(String, default="#4a154b")
+    created_at = Column(DateTime, default=utcnow)
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    role = Column(String, default="owner")  # "owner" | "member"
+    joined_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id"),)
+
+
 class Channel(Base):
     __tablename__ = "channels"
 
     id = Column(String, primary_key=True, default=gen_uuid)
     name = Column(String, nullable=False, index=True)
     description = Column(Text, default="")
+    workspace_id = Column(String, nullable=True, index=True)  # ponytail: single-ws MVP
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -45,6 +78,7 @@ class Teammate(Base):
     model_provider = Column(String, nullable=False)   # e.g. "openai", "deepseek", "anthropic"
     model_name = Column(String, nullable=False)        # e.g. "gpt-4o", "deepseek-chat"
     api_key_ref = Column(String, nullable=True)        # reference to an APIKey id
+    workspace_id = Column(String, nullable=True, index=True)  # ponytail: single-ws MVP
     # Phase 7: Teammate intelligence fields
     skills = Column(JSON, default=list)                # ["python", "architecture", ...]
     capabilities = Column(JSON, default=list)          # ["coding", "code_review", "writing", ...]

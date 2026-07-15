@@ -57,6 +57,7 @@ async def init_db():
     from backend.models import DAGNodeModel  # noqa: F401
     from backend.models import PolicyDecisionModel  # noqa: F401
     from backend.models import TeammateTemplate  # noqa: F401
+    from backend.models import User, Workspace, WorkspaceMember  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if _is_sqlite:
@@ -72,6 +73,12 @@ async def _migrate_columns() -> None:
     from sqlalchemy import text
 
     expected = {
+        "channels": [
+            ("workspace_id", "VARCHAR", None),
+        ],
+        "teammates": [
+            ("workspace_id", "VARCHAR", None),
+        ],
         "tasks": [
             ("review_status", "VARCHAR", "pending"),
             ("git_commit", "VARCHAR", None),
@@ -114,3 +121,27 @@ async def _migrate_columns() -> None:
 async def get_db() -> AsyncSession:
     async with async_session() as session:
         yield session
+
+
+async def backfill_legacy_workspace() -> None:
+    """ponytail: map every pre-auth row (workspace_id IS NULL) to one 'legacy'
+    workspace so existing data lands in a workspace instead of breaking scope.
+    Idempotent. Upgrade path: real per-tenant workspaces via /api/workspaces."""
+    from sqlalchemy import text, select
+    from backend.models import Workspace, WorkspaceMember, User
+
+    async with async_session() as db:
+        try:
+            existing = (await db.execute(text("SELECT id FROM workspaces WHERE id = 'legacy'"))).first()
+            if not existing:
+                ws = Workspace(id="legacy", name="Default", owner_id="legacy")
+                db.add(ws)
+                await db.commit()
+            # rows without a workspace → legacy
+            for table in ("channels", "teammates"):
+                await db.execute(
+                    text(f"UPDATE {table} SET workspace_id = 'legacy' WHERE workspace_id IS NULL OR workspace_id = ''")
+                )
+            await db.commit()
+        except Exception as e:
+            logger.warning("[DB] legacy workspace backfill skipped: %s", e)

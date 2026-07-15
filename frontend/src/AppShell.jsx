@@ -30,12 +30,6 @@ export default function AppShell({ onNavigateToLanding }) {
   const [channelId, setChannelId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [lang, setLang] = useState(() => localStorage.getItem('aihub_lang') || 'zh');
-
-  const changeLang = useCallback((newLang) => {
-    setLang(newLang);
-    localStorage.setItem('aihub_lang', newLang);
-  }, []);
 
   const triggerRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -73,8 +67,6 @@ export default function AppShell({ onNavigateToLanding }) {
     viewProps = {
       onClose: () => setShowSettings(false),
       triggerRefresh,
-      lang,
-      changeLang,
       onNavigate: handleNavigate,
     };
   } else if (view === 'chat') {
@@ -99,7 +91,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'projects') {
     viewKey = 'projects-' + refreshKey;
     ViewComponent = ProjectsPage;
-    viewProps = { lang };
+    viewProps = {};
   } else if (view === 'inbox') {
     viewKey = 'inbox-' + refreshKey;
     ViewComponent = InboxPage;
@@ -107,7 +99,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'team') {
     viewKey = 'team-' + refreshKey;
     ViewComponent = TeamPage;
-    viewProps = { lang };
+    viewProps = {};
   } else if (view === 'dashboard') {
     viewKey = 'dashboard-' + refreshKey;
     ViewComponent = DashboardPage;
@@ -115,11 +107,11 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'brain') {
     viewKey = 'brain-' + refreshKey;
     ViewComponent = BrainPage;
-    viewProps = { lang };
+    viewProps = {};
   } else if (view === 'proposals') {
     viewKey = 'proposals-' + refreshKey;
     ViewComponent = ProposalApprovalPage;
-    viewProps = { lang };
+    viewProps = {};
   } else if (view === 'approvals') {
     viewKey = 'approvals-' + refreshKey;
     ViewComponent = ApprovalQueuePage;

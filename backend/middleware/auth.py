@@ -168,8 +168,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self._key_callback = api_key_callback
 
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for health, docs, and favicon only
-        skip_paths = ("/api/health", "/v1/health", "/docs", "/openapi.json", "/favicon.ico")
+        # Skip auth for health and favicon only
+        skip_paths = ("/api/health", "/v1/health", "/favicon.ico")
         if request.url.path in skip_paths:
             return await call_next(request)
 

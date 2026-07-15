@@ -6,11 +6,16 @@ import {
 } from 'lucide-react';
 import * as api from '../../services/api';
 import { CHINESE_PROVIDERS, OVERSEAS_PROVIDERS } from '../../services/providers';
-import { useTranslation, SUPPORTED_LANGUAGES } from '../../i18n';
+import { useTranslation, SUPPORTED_LANGUAGES, useLang } from '../../i18n';
 import ConfirmDialog from '../ConfirmDialog';
 
-export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLang, onNavigate }) {
+export default function SettingsPanel({ onClose, triggerRefresh, onNavigate }) {
   const t = useTranslation();
+  const currentLang = useLang();
+  const handleLangChange = (newLang) => {
+    localStorage.setItem('aihub_lang', newLang);
+    window.dispatchEvent(new StorageEvent('storage', { key: 'aihub_lang', newValue: newLang }));
+  };
   const [tab, setTab] = useState('apikeys');
   const [apiKeys, setApiKeys] = useState([]);
   const [showNewKey, setShowNewKey] = useState(false);
@@ -99,16 +104,15 @@ export default function SettingsPanel({ onClose, triggerRefresh, lang, changeLan
               {SUPPORTED_LANGUAGES.map(l => (
                 <button
                   key={l.id}
-                  onClick={() => changeLang(l.id)}
+                  onClick={() => handleLangChange(l.id)}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                    lang === l.id
+                    currentLang === l.id
                       ? 'border-primary/30 bg-canvas-lavender text-primary shadow-sm'
                       : 'border-hairline hover:border-primary/10 text-ink hover:bg-surface-hover'
                   }`}
                 >
-                  <span className="text-xl">{l.flag}</span>
                   <span>{l.name}</span>
-                  {lang === l.id && <Check size={14} className="ml-auto text-primary" />}
+                  {currentLang === l.id && <Check size={14} className="ml-auto text-primary" />}
                 </button>
               ))}
             </div>

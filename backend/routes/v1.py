@@ -52,12 +52,15 @@ async def v1_chat(req: ChatRequest, request: Request):
     Uses team_collaboration engine for multi-teammate synthesis.
     """
     from backend.routes.messages import send_message
+    from backend.database import async_session
 
     if req.stream:
-        return await send_message(
-            channel_id=req.channel_id,
-            data={"content": req.message, "author_name": "You"},
-        )
+        async with async_session() as db:
+            return await send_message(
+                channel_id=req.channel_id,
+                data={"content": req.message, "author_name": "You"},
+                db=db,
+            )
     else:
         # Non-streaming: collect full response
         from backend.services.pipeline import run_pipeline

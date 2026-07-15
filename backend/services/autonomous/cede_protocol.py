@@ -299,9 +299,9 @@ class CedeProtocol:
 
         is_relevant = matches >= 2 or confidence >= 0.3
 
-        # No keyword match → message not in this teammate's domain → CEDE
+        # No keyword match → generic message, let the teammate decide by LLM
         if matches == 0:
-            return False, 0.0
+            return True, 0.3  # ponytail: default respond to avoid silent ceiling
 
         return is_relevant, confidence
 

@@ -152,7 +152,7 @@ export default function Navbar({ onEnterApp, lang, changeLang }) {
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = '#000'; e.currentTarget.style.background = '#f0f0f0'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? '#fc1c46' : '#888'; e.currentTarget.style.background = 'none'; }}>
-                  {l.flag} {l.name}
+                  {l.name}
                 </button>
               );
             })}

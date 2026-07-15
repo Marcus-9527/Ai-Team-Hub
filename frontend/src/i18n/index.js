@@ -10,33 +10,11 @@ export function useLang() {
 const loaders = {
   zh: () => import('./zh'),
   en: () => import('./en'),
-  ja: () => import('./ja'),
-  ko: () => import('./ko'),
-  es: () => import('./es'),
-  fr: () => import('./fr'),
-  de: () => import('./de'),
-  pt: () => import('./pt'),
-  ru: () => import('./ru'),
-  ar: () => import('./ar'),
-  hi: () => import('./hi'),
-  it: () => import('./it'),
-  nl: () => import('./nl'),
 };
 
 export const SUPPORTED_LANGUAGES = [
-  { id: 'zh', name: '中文', flag: '🇨🇳' },
-  { id: 'en', name: 'English', flag: '🇺🇸' },
-  { id: 'ja', name: '日本語', flag: '🇯🇵' },
-  { id: 'ko', name: '한국어', flag: '🇰🇷' },
-  { id: 'es', name: 'Español', flag: '🇪🇸' },
-  { id: 'fr', name: 'Français', flag: '🇫🇷' },
-  { id: 'de', name: 'Deutsch', flag: '🇩🇪' },
-  { id: 'pt', name: 'Português', flag: '🇧🇷' },
-  { id: 'ru', name: 'Русский', flag: '🇷🇺' },
-  { id: 'ar', name: 'العربية', flag: '🇸🇦' },
-  { id: 'hi', name: 'हिन्दी', flag: '🇮🇳' },
-  { id: 'it', name: 'Italiano', flag: '🇮🇹' },
-  { id: 'nl', name: 'Nederlands', flag: '🇳🇱' },
+  { id: 'zh', name: '中文' },
+  { id: 'en', name: 'English' },
 ];
 
 function useStrings(lang) {

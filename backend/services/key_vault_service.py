@@ -34,17 +34,22 @@ async def add_key(
     label: str,
     raw_key: str,
     base_url: str = "",
+    workspace_id: str | None = None,
     db: Optional[AsyncSession] = None,
 ) -> dict:
     """Store a new encrypted API key. Returns metadata (never the key itself).
 
-    Only ONE active key per provider (single-user mode).
-    If an active key exists for this provider, it is deactivated.
+    One active key per (provider, workspace). An existing active key in the
+    same workspace+provider is deactivated. workspace_id None = legacy/global.
     """
     async with async_session() as session:
-        # Deactivate existing active keys for this provider
+        # Deactivate existing active keys for this provider in the same workspace
         result = await session.execute(
-            select(APIKey).where(APIKey.provider == provider, APIKey.is_active == "1")
+            select(APIKey).where(
+                APIKey.provider == provider,
+                APIKey.is_active == "1",
+                APIKey.workspace_id == (workspace_id or None),
+            )
         )
         existing = result.scalars().all()
         for k in existing:
@@ -60,6 +65,7 @@ async def add_key(
             key_hash=key_hash,
             base_url=base_url or None,
             is_active=True,
+            workspace_id=workspace_id or None,
         )
         session.add(new_key)
         await session.commit()
@@ -69,12 +75,13 @@ async def add_key(
         apikey_cache.invalidate(new_key.id)
         apikey_cache.invalidate_prefix(f"provider:{provider}")
 
-        logger.info("Key added: provider=%s label=%s id=%s (active)", provider, label, new_key.id)
+        logger.info("Key added: provider=%s label=%s id=%s ws=%s (active)", provider, label, new_key.id, workspace_id)
         return {
             "id": new_key.id,
             "provider": new_key.provider,
             "label": new_key.label,
             "base_url": new_key.base_url,
+            "workspace_id": new_key.workspace_id,
             "is_active": new_key.is_active == "1",
             "has_key": True,
         }
@@ -105,12 +112,16 @@ async def get_key(
         return plain, obj.base_url or ""
 
 
-async def get_key_by_provider(provider: str) -> Optional[tuple[str, str, str]]:
-    """Get the active key for a provider.
+async def get_key_by_provider(
+    provider: str,
+    workspace_id: str | None = None,
+) -> Optional[tuple[str, str, str]]:
+    """Get the active key for a provider within a workspace.
 
     Returns (key_id, decrypted_key, base_url) or None.
+    workspace_id None falls back to any key with no workspace (legacy/global).
     """
-    cache_key = f"provider:{provider}"
+    cache_key = f"provider:{provider}:{workspace_id or 'global'}"
     cached = apikey_cache.get(cache_key)
     if cached is not None:
         return cached["id"], cached["api_key"], cached.get("base_url", "") or ""
@@ -120,6 +131,7 @@ async def get_key_by_provider(provider: str) -> Optional[tuple[str, str, str]]:
             select(APIKey).where(
                 APIKey.provider == provider,
                 APIKey.is_active == "1",
+                APIKey.workspace_id == (workspace_id or None),
             ).order_by(APIKey.created_at.desc()).limit(1)
         )
         obj = result.scalar_one_or_none()
@@ -161,6 +173,7 @@ async def rotate_key(key_id: str, new_raw_key: str) -> Optional[dict]:
             key_hash=key_hash,
             base_url=base_url,
             is_active=True,
+            workspace_id=old.workspace_id,
         )
         session.add(new_key)
         await session.commit()
@@ -188,7 +201,7 @@ async def revoke_key(key_id: str) -> bool:
         obj.is_active = "0"
         await session.commit()
         apikey_cache.invalidate(obj.id)
-        apikey_cache.invalidate_prefix(f"provider:{obj.provider}")
+        apikey_cache.invalidate_prefix(f"provider:{obj.provider}:{obj.workspace_id or 'global'}")
         logger.info("Key revoked: provider=%s id=%s", obj.provider, key_id)
         return True
 
@@ -209,12 +222,20 @@ async def test_key(key_id: str) -> dict:
         }
 
 
-async def list_keys(db: Optional[AsyncSession] = None) -> list[dict]:
-    """List all active API keys (safe metadata only, never the keys themselves)."""
+async def list_keys(
+    workspace_id: str | None = None,
+    db: Optional[AsyncSession] = None,
+) -> list[dict]:
+    """List active API keys (safe metadata only, never the keys themselves).
+
+    When workspace_id is given, returns only that workspace's keys.
+    """
     async with async_session() as session:
-        result = await session.execute(
-            select(APIKey).where(APIKey.is_active == "1").order_by(APIKey.created_at)
-        )
+        q = select(APIKey).where(APIKey.is_active == "1")
+        if workspace_id is not None:
+            q = q.where(APIKey.workspace_id == (workspace_id or None))
+        q = q.order_by(APIKey.created_at)
+        result = await session.execute(q)
         keys = result.scalars().all()
         return [
             {
@@ -222,6 +243,7 @@ async def list_keys(db: Optional[AsyncSession] = None) -> list[dict]:
                 "provider": k.provider,
                 "label": k.label,
                 "base_url": k.base_url,
+                "workspace_id": k.workspace_id,
                 "is_active": k.is_active == "1",
                 "has_key": bool(k.api_key),
                 "created_at": k.created_at.isoformat() if k.created_at else None,

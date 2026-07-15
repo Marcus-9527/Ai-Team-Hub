@@ -15,9 +15,9 @@ import sys
 import logging
 from cryptography.fernet import Fernet, InvalidToken
 
-logger = logging.getLogger("security.crypto")
+from backend.config import ENCRYPTION_KEY_ENV, ENCRYPTION_KEY_REQUIRED
 
-ENCRYPTION_KEY_ENV = "AI_TEAM_HUB_CRYPTO_KEY"
+logger = logging.getLogger("security.crypto")
 
 _KEY_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", ".crypto_key"
@@ -34,7 +34,7 @@ def _get_fernet() -> Fernet:
 
     # Production enforcement: if AI_TEAM_HUB_CRYPTO_KEY_REQUIRED is set
     # we refuse to fall back to file-based or auto-generated key.
-    enforce = os.environ.get("AI_TEAM_HUB_CRYPTO_KEY_REQUIRED", "").lower() in ("1", "true", "yes")
+    enforce = ENCRYPTION_KEY_REQUIRED
     key = os.environ.get(ENCRYPTION_KEY_ENV)
     if key:
         try:

@@ -417,12 +417,14 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
 
     # Get all teammates in this channel
     channel_data = teammate_cache.get(f"channel_teammates:{channel_id}")
+    channel_ws = None
     if channel_data is None:
         ch_result = await db.execute(select(ChannelModel).where(ChannelModel.id == channel_id))
         ch_obj = ch_result.scalar_one_or_none()
         if ch_obj:
             tm_ids = ch_obj.teammate_ids or []
             channel_data = list(tm_ids) if tm_ids else []
+            channel_ws = ch_obj.workspace_id
             teammate_cache.set(f"channel_teammates:{channel_id}", channel_data)
         else:
             channel_data = []
@@ -448,6 +450,7 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
             "avatar_emoji": tm_obj.avatar_emoji, "system_prompt": tm_obj.system_prompt,
             "model_provider": tm_obj.model_provider, "model_name": tm_obj.model_name,
             "api_key_ref": tm_obj.api_key_ref,
+            "workspace_id": tm_obj.workspace_id,
         }
         teammate_cache.set(tm_id, tm)
         return tm
@@ -455,8 +458,13 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
     # Ponytail fallback: if a teammate was never bound to a key but the
     # workspace has an active key, use it. Prevents the "configured a key but
     # channel says none found" dead-end (P1 #1).
-    async def _fallback_key_ref() -> str | None:
-        kr = await db.execute(select(APIKey).where(APIKey.is_active == "1").limit(1))
+    async def _fallback_key_ref(ws: str | None = None) -> str | None:
+        kr = await db.execute(
+            select(APIKey).where(
+                APIKey.is_active == "1",
+                APIKey.workspace_id == (ws or None),
+            ).limit(1)
+        )
         k = kr.scalar_one_or_none()
         return k.id if k else None
 
@@ -465,7 +473,7 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         # Only the specified teammates
         for tm_id in teammate_ids:
             tm = await _load_teammate(tm_id)
-            if tm and (tm.get("api_key_ref") or await _fallback_key_ref()):
+            if tm and (tm.get("api_key_ref") or await _fallback_key_ref(channel_ws)):
                 all_teammates.append(tm)
         if not all_teammates:
             raise HTTPException(status_code=400, detail=_no_key_error("No specified teammates found or have API keys"))
@@ -473,7 +481,7 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         # All channel teammates
         for tm_id in channel_data:
             tm = await _load_teammate(tm_id)
-            if tm and (tm.get("api_key_ref") or await _fallback_key_ref()):
+            if tm and (tm.get("api_key_ref") or await _fallback_key_ref(channel_ws)):
                 all_teammates.append(tm)
         if not all_teammates:
             raise HTTPException(status_code=400, detail=_no_key_error("No teammates with API keys found in this channel"))

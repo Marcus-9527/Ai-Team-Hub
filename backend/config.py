@@ -1,4 +1,8 @@
-"""CORS + CSP configuration constants."""
+"""Central configuration constants: CORS, CSP, and encryption key.
+
+Keeping these together enforces the "config is centralized" rule — no
+scattered os.environ reads for cross-cutting infrastructure settings.
+"""
 import os
 
 _CORS_RAW = os.environ.get("CORS_ORIGINS", "")
@@ -22,4 +26,18 @@ CSP = (
     "img-src 'self' data: https:; "
     "connect-src 'self'; "
     "frame-ancestors 'none'"
+)
+
+# ── Encryption key ──
+# API keys are encrypted at rest (Fernet, see backend.security.crypto). The
+# key itself is sourced from the env var below (or a file / auto-generated in
+# dev). We centralize the env-var name here so it is not scattered, but the
+# actual key loading/validation lives in backend.security.crypto (single source
+# of truth for the crypto singleton).
+ENCRYPTION_KEY_ENV = "AI_TEAM_HUB_CRYPTO_KEY"
+# When set, startup refuses to fall back to file / auto-generated keys.
+ENCRYPTION_KEY_REQUIRED = os.environ.get("AI_TEAM_HUB_CRYPTO_KEY_REQUIRED", "").lower() in (
+    "1",
+    "true",
+    "yes",
 )

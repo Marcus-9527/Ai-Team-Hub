@@ -69,6 +69,7 @@ async def _load_teammate(teammate_id: str) -> Optional[dict]:
                 "model_provider": obj.model_provider,
                 "model_name": obj.model_name,
                 "api_key_ref": obj.api_key_ref,
+                "workspace_id": obj.workspace_id,
                 "system_prompt": obj.system_prompt,
             }
             return d

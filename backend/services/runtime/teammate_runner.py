@@ -274,10 +274,11 @@ async def resolve_api_key(teammate: dict) -> tuple[Optional[str], Optional[str],
     and should be replaced with it.
     """
     tm_api_key_ref = teammate.get("api_key_ref")
+    ws_id = teammate.get("workspace_id")
     fallback = False
     fallback_model = None
     if not tm_api_key_ref:
-        fb = await _workspace_active_key()
+        fb = await _workspace_active_key(ws_id)
         if fb:
             tm_api_key_ref, fb_base, fb_provider = fb
             fallback = True
@@ -307,10 +308,19 @@ async def resolve_api_key(teammate: dict) -> tuple[Optional[str], Optional[str],
     return None, None, None, None
 
 
-async def _workspace_active_key() -> Optional[tuple]:
-    """Return (id, base_url, provider) for any active workspace key, or None."""
+async def _workspace_active_key(workspace_id: str | None = None) -> Optional[tuple]:
+    """Return (id, base_url, provider) for the active workspace key, or None.
+
+    Scoped to workspace_id when given; otherwise matches workspace-less keys
+    (legacy/global fallback).
+    """
     async with async_session() as sess:
-        result = await sess.execute(select(APIKey).where(APIKey.is_active == "1").limit(1))
+        result = await sess.execute(
+            select(APIKey).where(
+                APIKey.is_active == "1",
+                APIKey.workspace_id == (workspace_id or None),
+            ).limit(1)
+        )
         k = result.scalar_one_or_none()
         if k:
             return k.id, (k.base_url or ""), k.provider

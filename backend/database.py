@@ -79,6 +79,9 @@ async def _migrate_columns() -> None:
         "teammates": [
             ("workspace_id", "VARCHAR", None),
         ],
+        "apikeys": [
+            ("workspace_id", "VARCHAR", None),
+        ],
         "tasks": [
             ("review_status", "VARCHAR", "pending"),
             ("git_commit", "VARCHAR", None),
@@ -138,7 +141,7 @@ async def backfill_legacy_workspace() -> None:
                 db.add(ws)
                 await db.commit()
             # rows without a workspace → legacy
-            for table in ("channels", "teammates"):
+            for table in ("channels", "teammates", "apikeys"):
                 await db.execute(
                     text(f"UPDATE {table} SET workspace_id = 'legacy' WHERE workspace_id IS NULL OR workspace_id = ''")
                 )

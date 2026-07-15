@@ -129,6 +129,7 @@ class APIKey(Base):
     key_hash = Column(String, nullable=True)                # SHA-256[:16] for validation
     base_url = Column(String, nullable=True)                # custom endpoint
     is_active = Column("is_active", String, default="1")    # "1" = active, "0" = revoked
+    workspace_id = Column(String, nullable=True, index=True)  # keys scoped to a workspace
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

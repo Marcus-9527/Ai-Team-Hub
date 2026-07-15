@@ -24,6 +24,24 @@ from backend.crypto import decrypt_value
 logger = logging.getLogger("runtime.teammate_runner")
 
 
+_CHAT_TOOL_INSTRUCTIONS = """\
+## Tool Access
+You can use tools to read/write files, run shell commands, and execute code.
+To use a tool, include one or more fenced blocks in your response:
+<TOOL>
+{"tool": "file_read", "args": {"path": "src/main.py"}}
+</TOOL>
+
+Available tools:
+- file_read(path): read a file
+- file_write(path, content): write/overwrite a file
+- shell_exec(command): run shell commands (pytest, git, npm)
+- code_exec(code, language="python"): run arbitrary code (python3/node/bash; 30s timeout)
+
+Once the tools complete their work, reply with a plain-text summary (no <TOOL> blocks).
+"""
+
+
 # ── Role Detection ──
 
 ROLE_AXIS_PROMPTS = {
@@ -137,11 +155,14 @@ def build_turn_prompt(
     if shared_attachment_context:
         attachment_section = _build_attachment_section(shared_attachment_context, role)
 
+    tools_section = _CHAT_TOOL_INSTRUCTIONS if role in ("engineer", "techlead", "engineer_lead") else ""
+
     return f"""{system_prompt}
 
 {axis}
 
 {attachment_section}
+{tools_section}
 ## Question from user:
 {user_message}
 

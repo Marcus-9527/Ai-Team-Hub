@@ -17,9 +17,11 @@ const BrainPage = lazy(() => import('./components/Brain/BrainPage'));
 const ProposalApprovalPage = lazy(() => import('./components/Brain/ProposalApprovalPage'));
 const ApprovalQueuePage = lazy(() => import('./components/Approval/ApprovalQueuePage'));
 const AutonomousCenter = lazy(() => import('./components/Autonomous/AIOpsCenter'));
+const AutomationJobsPage = lazy(() => import('./components/Autonomous/AutomationJobsPage'));
 const ExecutionRoom = lazy(() => import('./components/Execution/ExecutionRoom'));
 const WorkspaceExplorer = lazy(() => import('./components/Workspace/WorkspaceExplorer'));
 const SystemHealthView = lazy(() => import('./components/SystemHealth/SystemHealth'));
+const TemplateGallery = lazy(() => import('./components/Templates/TemplateGallery'));
 
 function ViewFallback() {
   return <div className="flex-1 flex items-center justify-center text-gray-400">加载中…</div>;
@@ -120,6 +122,10 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'autonomous-' + refreshKey;
     ViewComponent = AutonomousCenter;
     viewProps = {};
+  } else if (view === 'automation-jobs') {
+    viewKey = 'automation-jobs-' + refreshKey;
+    ViewComponent = AutomationJobsPage;
+    viewProps = {};
   } else if (view === 'ai-ops') {
     viewKey = 'ai-ops-' + refreshKey;
     ViewComponent = AutonomousCenter;
@@ -135,6 +141,10 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'system-health') {
     viewKey = 'system-health-' + refreshKey;
     ViewComponent = SystemHealthView;
+    viewProps = {};
+  } else if (view === 'templates') {
+    viewKey = 'templates-' + refreshKey;
+    ViewComponent = TemplateGallery;
     viewProps = {};
   } else {
     viewKey = 'inbox-' + refreshKey;

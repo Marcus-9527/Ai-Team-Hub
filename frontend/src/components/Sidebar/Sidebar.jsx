@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target, Bot } from 'lucide-react';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
 import CreateChannelModal from '../Channel/CreateChannelModal';
@@ -13,6 +13,8 @@ const NAV_ITEMS = [
   { view: 'team',      icon: Users,         label: '团队' },
   { view: 'brain',     icon: BrainCircuit,  label: '知识库' },
   { view: 'ai-ops',    icon: Zap,           label: '自动化' },
+  { view: 'automation-jobs', icon: Bot,     label: 'AI员工' },
+  { view: 'templates', icon: FileCheck,     label: '模板库' },
 ];
 
 export default function Sidebar({

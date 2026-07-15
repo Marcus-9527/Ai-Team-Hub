@@ -186,3 +186,21 @@ export const rejectProposal = (proposalId, resolvedBy = 'user') =>
     method: 'POST',
     body: JSON.stringify({ proposal_id: proposalId, resolved_by: resolvedBy }),
   });
+
+// ── Teammate Blueprint Templates ──
+export const listTemplates = () => request('/api/teammates/templates');
+export const createFromTemplate = (data) =>
+  request('/api/teammates/from-template', { method: 'POST', body: JSON.stringify(data) });
+
+// ── Automation v2: Teammate Autonomous Jobs ──
+export const listAutomationJobs = () => request('/api/automation-jobs');
+export const createAutomationJob = (data) =>
+  request('/api/automation-jobs', { method: 'POST', body: JSON.stringify(data) });
+export const updateAutomationJob = (id, data) =>
+  request(`/api/automation-jobs/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+export const deleteAutomationJob = (id) =>
+  request(`/api/automation-jobs/${id}`, { method: 'DELETE' });
+export const triggerAutomationJob = (id) =>
+  request(`/api/automation-jobs/${id}/trigger`, { method: 'POST' });
+export const listAutomationRuns = (jobId) =>
+  request(`/api/automation-jobs/${jobId}/runs`);

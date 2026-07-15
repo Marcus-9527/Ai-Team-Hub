@@ -45,6 +45,22 @@ export default {
   'nav.proposals': '提案审批',
   'nav.autonomous': '自主协作',
   'nav.ai_ops': 'AI 自动化',
+  'nav.templates': '模板库',
+
+  /* ── Team Template Gallery ── */
+  'template.title': 'AI 员工模板库',
+  'template.subtitle': '一键创建专业 AI 员工',
+  'template.search': '搜索模板...',
+  'template.engineering': '工程技术',
+  'template.business': '商业管理',
+  'template.all': '全部',
+  'template.create_btn': '一键创建',
+  'template.creating': '创建中...',
+  'template.created': '✓ 已创建',
+  'template.no_results': '没有匹配的模板',
+  'template.confirm_title': '创建 AI 员工',
+  'template.confirm_msg': '确定要从模板「{0}」创建 AI 员工？创建后可到团队页配置模型和 API 密钥。',
+  'template.create_success': 'AI 员工「{0}」创建成功',
 
   /* ── Welcome ── */
   'welcome.title': '欢迎使用 AI Team Hub',

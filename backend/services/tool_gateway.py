@@ -36,3 +36,18 @@ def get_tool_gateway() -> ToolGateway:
 def init_tool_gateway() -> None:
     global _gateway
     _gateway = ToolGateway()
+    # ponytail: register tool_runtime functions so the gateway isn't a skeleton.
+    # The engineer workflow calls tool_runtime.execute_tool() directly;
+    # this makes get_tool_gateway().execute() work for future consumers.
+    from backend.services.runtime import tool_runtime
+
+    def _wrap(name: str):
+        async def fn(**kwargs):
+            ws_id = kwargs.pop("workspace_id", "default")
+            return await tool_runtime.execute_tool(
+                {"tool": name, "args": kwargs}, ws_id,
+            )
+        return fn
+
+    for _t in ("file_read", "file_write", "shell_exec", "code_exec"):
+        _gateway.register(_t, _wrap(_t))

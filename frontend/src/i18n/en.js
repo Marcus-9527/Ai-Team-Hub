@@ -43,6 +43,22 @@ export default {
   'nav.proposals': 'Proposals',
   'nav.autonomous': 'Autonomy',
   'nav.ai_ops': 'AI Automation',
+  'nav.templates': 'Templates',
+
+  /* ── Team Template Gallery ── */
+  'template.title': 'AI Employee Templates',
+  'template.subtitle': 'One-click to create professional AI employees',
+  'template.search': 'Search templates...',
+  'template.engineering': 'Engineering',
+  'template.business': 'Business',
+  'template.all': 'All',
+  'template.create_btn': 'Create',
+  'template.creating': 'Creating...',
+  'template.created': '✓ Created',
+  'template.no_results': 'No matching templates',
+  'template.confirm_title': 'Create AI Employee',
+  'template.confirm_msg': 'Create an AI employee from template "{0}"? You can configure the model and API key on the Team page after creation.',
+  'template.create_success': 'AI employee "{0}" created successfully',
 
   'welcome.title': 'Welcome to AI Team Hub',
   'welcome.subtitle': 'Create your AI team. Add channels, invite teammates, and tackle problems together.',

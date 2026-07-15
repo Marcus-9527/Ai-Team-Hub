@@ -36,6 +36,16 @@ _ALLOWED_SHELL = {
     "git commit": ["git", "commit"],
 }
 
+# Language → interpreter mapping for code_exec sandbox.
+_CODE_EXEC_RUNNERS = {
+    "python": ["python3"],
+    "python3": ["python3"],
+    "node": ["node"],
+    "nodejs": ["node"],
+    "bash": ["bash"],
+    "sh": ["sh"],
+}
+
 
 class ToolError(Exception):
     """Raised when a tool call is rejected or fails (non-zero exit)."""
@@ -199,6 +209,65 @@ async def _git_merge_async(workspace_id: str, branch: str) -> dict:
     return {"ok": True, "output": out.decode("utf-8", "replace")[:2000]}
 
 
+async def code_exec(workspace_id: str, code: str, language: str = "python",
+                   timeout: float = 30.0) -> dict:
+    """Run arbitrary code in a sandbox subprocess (timeout + output limit).
+
+    Writes code to a temp file under the workspace, runs it with the
+    appropriate interpreter, captures stdout/stderr, cleans up.
+
+    ponytail: no chroot/docker — the only isolation is:
+      - timeout (prevents runaway loops)
+      - output cap (prevents OOM from huge print)
+      - runs inside the workspace cwd (not a separate jail)
+    """
+    import tempfile
+
+    argv_head = _CODE_EXEC_RUNNERS.get(language)
+    if argv_head is None:
+        raise ToolError(f"unsupported language: {language}")
+
+    ext_map = {"python": ".py", "python3": ".py",
+               "node": ".js", "nodejs": ".js",
+               "bash": ".sh", "sh": ".sh"}
+    ext = ext_map.get(language, ".py")
+    root = workspace_root(workspace_id)
+    sandbox = os.path.join(root, ".code_sandbox")
+    os.makedirs(sandbox, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(suffix=ext, dir=sandbox, mode="w",
+                                     delete=False, encoding="utf-8") as f:
+        f.write(code)
+        script_path = f.name
+
+    argv = [*argv_head, script_path]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, cwd=root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return {
+            "language": language,
+            "returncode": proc.returncode,
+            "stdout": out.decode("utf-8", "replace")[:8000],
+            "stderr": err.decode("utf-8", "replace")[:2000],
+        }
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise ToolError(f"code_exec timed out ({timeout}s)")
+    finally:
+        # Clean up temp file even on error.
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+
+
 async def execute_tool(
     call: dict, workspace_id: str, subject: str = "unknown",
     task_id: str = "", channel_id: str = "",
@@ -217,7 +286,7 @@ async def execute_tool(
     args = (call or {}).get("args") or {}
 
     # ── Policy Gate: check before dangerous actions ──
-    _dangerous = {"file_write", "shell_exec", "git_commit", "git_merge",
+    _dangerous = {"file_write", "shell_exec", "code_exec", "git_commit", "git_merge",
                   "task_create", "message_send"}
     if tool in _dangerous:
         resource = args.get("command") or args.get("path") or args.get("branch") or "*"
@@ -253,6 +322,9 @@ async def execute_tool(
             out = await file_write(workspace_id, args["path"], args["content"])
         elif tool == "shell_exec":
             out = await shell_exec(workspace_id, args["command"])
+        elif tool == "code_exec":
+            out = await code_exec(workspace_id, args["code"], args.get("language", "python"),
+                                  timeout=args.get("timeout", 30.0))
         elif tool == "git_commit":
             msg = args.get("message", "update")
             out = await _git_commit_async(workspace_id, msg)

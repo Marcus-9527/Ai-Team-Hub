@@ -76,12 +76,14 @@ from backend.routes.dashboard import router as dashboard_router
 from backend.routes.policy import router as policy_router
 from backend.routes.brain import router as brain_router
 from backend.routes.automation import router as automation_router, automation_poll_loop
+from backend.routes.automation_v2 import router as automation_v2_router, automation_v2_poll_loop
 from backend.routes.demo import router as demo_router
 
 logger = logging.getLogger("main")
 
 _sync_task: asyncio.Task | None = None
 _automation_task: asyncio.Task | None = None
+_automation_v2_task: asyncio.Task | None = None
 
 
 async def _periodic_model_sync(interval: int = CACHE_TTL):
@@ -168,6 +170,10 @@ async def lifespan(app: FastAPI):
     _automation_task = asyncio.create_task(automation_poll_loop(interval=30))
     logger.info("Automation poll loop started (30s interval)")
 
+    # ── Phase 30: Automation v2 poll loop ──
+    _automation_v2_task = asyncio.create_task(automation_v2_poll_loop(interval=60))
+    logger.info("Automation v2 poll loop started (60s interval)")
+
     yield
 
     # Shutdown
@@ -181,6 +187,12 @@ async def lifespan(app: FastAPI):
         _automation_task.cancel()
         try:
             await _automation_task
+        except asyncio.CancelledError:
+            pass
+    if _automation_v2_task:
+        _automation_v2_task.cancel()
+        try:
+            await _automation_v2_task
         except asyncio.CancelledError:
             pass
     from backend.routes.maeos import _maeos
@@ -285,6 +297,7 @@ app.include_router(brain_router)
 # Phase 13 — Autonomous Collaboration
 app.include_router(autonomous_router)                 # /api/brain
 app.include_router(automation_router)             # /api/automation
+app.include_router(automation_v2_router)          # /api/automation-jobs
 app.include_router(demo_router)
 
 

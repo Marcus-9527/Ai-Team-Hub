@@ -1109,6 +1109,54 @@ class AutomationRuleModel(Base):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Phase 30: Automation Job — Teammate Autonomous Automation Engine v2
+# ═══════════════════════════════════════════════════════════════
+
+
+class AutomationJobModel(Base):
+    """Recurring/event-driven automation job tied to a specific teammate identity."""
+    __tablename__ = "automation_jobs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    workspace_id = Column(String, default="")
+    teammate_id = Column(String, default="", index=True)
+    name = Column(String, nullable=False)
+    trigger_type = Column(String, default="manual")  # cron | event | webhook | manual
+    schedule_expression = Column(String, default="")  # cron expression or ISO interval
+    goal = Column(Text, default="")
+    sop_definition = Column(JSON, default=dict)  # structured SOP steps
+    status = Column(String, default="active")  # active | paused | archived
+    is_active = Column(String, default="1")
+    last_run = Column(DateTime, nullable=True)
+    next_run = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AutomationRunModel(Base):
+    """Execution record of an automation job."""
+    __tablename__ = "automation_runs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    job_id = Column(
+        String,
+        ForeignKey("automation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trigger = Column(String, default="manual")
+    actions = Column(JSON, default=list)
+    result = Column(Text, default="")
+    artifact = Column(JSON, default=dict)
+    created_tasks = Column(JSON, default=list)  # task IDs created during this run
+    status = Column(String, default="pending")  # pending | running | completed | failed
+    error = Column(Text, default="")
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════
 # Phase 17: Policy Audit Decision Model
 # ═══════════════════════════════════════════════════════════════
 
@@ -1199,3 +1247,28 @@ class TaskRunModel(Base):
             "summary": self.summary,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ═══════════════════════════════════════════════════════════
+# Teammate Blueprint Template
+# ═══════════════════════════════════════════════════════════
+
+
+class TeammateTemplate(Base):
+    """Pre-built teammate blueprint for one-click creation."""
+    __tablename__ = "teammate_templates"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=False, index=True)
+    description = Column(Text, default="")
+    identity = Column(String, default="")
+    system_prompt = Column(Text, default="")
+    skills = Column(JSON, default=list)
+    tools = Column(JSON, default=list)
+    memory_schema = Column(JSON, default=dict)
+    automation_defaults = Column(JSON, default=dict)
+    avatar_emoji = Column(String, default="🤖")
+    model_provider = Column(String, default="openrouter")
+    model_name = Column(String, default="openrouter/auto")
+    created_at = Column(DateTime, default=utcnow)

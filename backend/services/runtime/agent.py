@@ -42,7 +42,8 @@ Follow this fixed workflow and stop when done:
   1. ANALYZE the task.
   2. READ the relevant files with file_read to understand the code.
   3. MODIFY files with file_write (full file content, create or overwrite).
-  4. RUN tests with shell_exec (commands: "pytest", "npm test", "git status", "git diff").
+  4. RUN tests with shell_exec (commands: "pytest", "npm test", "git status", "git diff")
+     or use code_exec for arbitrary scripts (python3/node/bash, 30s timeout).
   5. REPORT the result in plain text (no <TOOL> blocks).
 
 Your workspace root is: {ws_root}

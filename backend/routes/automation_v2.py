@@ -1,0 +1,260 @@
+"""routes/automation_v2.py — Teammate Autonomous Automation Engine v2.
+
+Reuses existing TaskOrchestrator for execution. Adds:
+- AutomationJob CRUD (new schema: teammate-bound jobs with goal/SOP)
+- AutomationRun history
+- Background check-in poll loop (extensible to cron/event/webhook)
+"""
+import asyncio
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.database import get_db, async_session
+from backend.models import AutomationJobModel, AutomationRunModel, gen_uuid, utcnow, Teammate
+
+logger = logging.getLogger("routes.automation_v2")
+router = APIRouter(prefix="/api/automation-jobs", tags=["automation-v2"])
+
+
+# ── Schemas ──
+
+class CreateJobRequest(BaseModel):
+    name: str
+    teammate_id: str = ""
+    workspace_id: str = ""
+    trigger_type: str = "manual"
+    schedule_expression: str = ""
+    goal: str = ""
+    sop_definition: dict = {}
+    status: str = "active"
+
+
+# ── Job CRUD ──
+
+@router.get("")
+async def list_jobs(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationJobModel).order_by(AutomationJobModel.created_at.desc())
+    )
+    return {"jobs": [_j2d(j) for j in result.scalars().all()]}
+
+
+@router.post("", status_code=201)
+async def create_job(req: CreateJobRequest, db: AsyncSession = Depends(get_db)):
+    job = AutomationJobModel(
+        id=gen_uuid(),
+        name=req.name,
+        teammate_id=req.teammate_id,
+        workspace_id=req.workspace_id,
+        trigger_type=req.trigger_type,
+        schedule_expression=req.schedule_expression,
+        goal=req.goal,
+        sop_definition=req.sop_definition or {},
+        status=req.status,
+        is_active="1",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return _j2d(job)
+
+
+@router.patch("/{job_id}")
+async def update_job(job_id: str, req: CreateJobRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationJobModel).where(AutomationJobModel.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    for field in ("name", "teammate_id", "workspace_id", "trigger_type",
+                  "schedule_expression", "goal", "sop_definition", "status"):
+        setattr(job, field, getattr(req, field))
+    job.updated_at = utcnow()
+    await db.commit()
+    await db.refresh(job)
+    return _j2d(job)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationJobModel).where(AutomationJobModel.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    await db.delete(job)
+    await db.commit()
+
+
+# ── Run history ──
+
+@router.get("/{job_id}/runs")
+async def list_runs(job_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationRunModel)
+        .where(AutomationRunModel.job_id == job_id)
+        .order_by(AutomationRunModel.created_at.desc())
+        .limit(50)
+    )
+    return {"runs": [_r2d(r) for r in result.scalars().all()]}
+
+
+# ── Manual trigger ──
+
+@router.post("/{job_id}/trigger")
+async def trigger_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationJobModel).where(AutomationJobModel.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    if job.is_active != "1":
+        raise HTTPException(400, detail="Job is not active")
+
+    # Create run record
+    run = AutomationRunModel(
+        id=gen_uuid(),
+        job_id=job.id,
+        trigger="manual",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(run)
+    await db.commit()
+
+    # Fire-and-forget execution
+    asyncio.create_task(_execute_job(job, run))
+    return {"run_id": run.id, "status": "running"}
+
+
+# ── Background check-in loop ──
+
+async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
+    """Execute one automation job: load teammate → create task via orchestrator."""
+    try:
+        async with async_session() as db:
+            # Load teammate identity
+            tm = None
+            if job.teammate_id:
+                tm = await db.get(Teammate, job.teammate_id)
+
+            # Create a task for this check-in run
+            from backend.services.task.task_manager import TaskManager
+            from backend.services.task.task_orchestrator import TaskOrchestrator
+            from backend.services.runtime.executor import ExecutionRuntime
+
+            title = f"[Auto] {job.name}"
+            description = job.goal[:500] if job.goal else job.name
+
+            mgr = TaskManager()
+            task = await mgr.create_task(
+                db, title=title, description=description,
+                channel_id="", intent=job.goal or job.name,
+            )
+            await db.commit()
+
+            # Run through orchestrator
+            runtime = ExecutionRuntime(max_workers=4)
+            orch = TaskOrchestrator(runtime=runtime)
+            await orch.start_task(db, task.id, job.goal or job.name)
+
+            # Update run record
+            run.status = "completed" if getattr(task, "status", "") == "COMPLETED" else "failed"
+            run.result = f"Task {task.id[:8]} finished: {getattr(task, 'status', 'unknown')}"
+            run.created_tasks = [task.id]
+            run.completed_at = datetime.now(timezone.utc)
+
+            job.last_run = datetime.now(timezone.utc)
+            await db.commit()
+
+            logger.info("[AUTOv2] job '%s' → task %s → %s", job.name[:30], task.id[:8], run.status)
+    except Exception as e:
+        logger.error("[AUTOv2] job '%s' failed: %s", job.name[:30], e)
+        try:
+            async with async_session() as db:
+                run = await db.get(AutomationRunModel, run.id)
+                if run:
+                    run.status = "failed"
+                    run.error = str(e)[:2000]
+                    run.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception:
+            pass
+
+
+async def _check_due_jobs():
+    """Check for due cron-type automation jobs."""
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(AutomationJobModel).where(
+                    AutomationJobModel.is_active == "1",
+                    AutomationJobModel.trigger_type.in_(["cron", "manual"]),
+                )
+            )
+            now = datetime.now(timezone.utc)
+            for job in result.scalars().all():
+                # ponytail: no real cron parser — just run jobs that have never run
+                # or whose next_run is in the past. Accept minimal for now.
+                if job.last_run is None:
+                    run = AutomationRunModel(
+                        id=gen_uuid(), job_id=job.id, trigger="cron",
+                        status="running", started_at=now,
+                    )
+                    db.add(run)
+                    await db.commit()
+                    asyncio.create_task(_execute_job(job, run))
+    except Exception as e:
+        logger.debug("[AUTOv2] check cycle: %s", e)
+
+
+async def automation_v2_poll_loop(interval: int = 60):
+    """Background loop: poll due automation jobs."""
+    while True:
+        await asyncio.sleep(interval)
+        await _check_due_jobs()
+
+
+# ── Helpers ──
+
+def _j2d(j: AutomationJobModel) -> dict:
+    return {
+        "id": j.id,
+        "workspace_id": j.workspace_id,
+        "teammate_id": j.teammate_id,
+        "name": j.name,
+        "trigger_type": j.trigger_type,
+        "schedule_expression": j.schedule_expression,
+        "goal": j.goal,
+        "sop_definition": j.sop_definition or {},
+        "status": j.status,
+        "is_active": j.is_active,
+        "last_run": str(j.last_run) if j.last_run else None,
+        "next_run": str(j.next_run) if j.next_run else None,
+        "created_at": str(j.created_at) if j.created_at else None,
+    }
+
+
+def _r2d(r: AutomationRunModel) -> dict:
+    return {
+        "id": r.id,
+        "job_id": r.job_id,
+        "trigger": r.trigger,
+        "actions": r.actions or [],
+        "result": r.result,
+        "artifact": r.artifact or {},
+        "created_tasks": r.created_tasks or [],
+        "status": r.status,
+        "error": r.error,
+        "started_at": str(r.started_at) if r.started_at else None,
+        "completed_at": str(r.completed_at) if r.completed_at else None,
+        "created_at": str(r.created_at) if r.created_at else None,
+    }

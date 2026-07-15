@@ -243,3 +243,203 @@ async def get_teammate_profile(teammate_id: str, db: AsyncSession = Depends(get_
         profile["current_state"] = "unknown"
 
     return profile
+
+
+# ═══════════════════════════════════════════════════════════
+# Teammate Blueprint Templates
+# ═══════════════════════════════════════════════════════════
+
+PRESET_TEMPLATES = [
+    # ── Engineering ──
+    {
+        "name": "CTO",
+        "category": "engineering",
+        "description": "首席技术官，制定技术战略与架构决策",
+        "identity": "cto",
+        "avatar_emoji": "🧑‍💼",
+        "system_prompt": "你是一个经验丰富的 CTO。能俯瞰全局技术架构，做出正确的技术选型决策。直接说结论，不用铺垫。回复控制在 50-150 字。",
+        "skills": ["architecture", "system-design", "tech-strategy", "leadership"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Backend Engineer",
+        "category": "engineering",
+        "description": "后端开发工程师，构建 API 和数据库",
+        "identity": "backend-engineer",
+        "avatar_emoji": "👨‍💻",
+        "system_prompt": "你是一个有 15 年经验的高级后端工程师。直接给答案，代码能短就短，可以吐槽烂代码。回复控制在 50-150 字。",
+        "skills": ["python", "api-design", "database", "backend"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Frontend Engineer",
+        "category": "engineering",
+        "description": "前端开发工程师，构建用户界面与交互",
+        "identity": "frontend-engineer",
+        "avatar_emoji": "👩‍💻",
+        "system_prompt": "你是一个高级前端工程师。React/TypeScript 精通，关注用户体验和性能。直接说问题，给具体代码。回复控制在 50-150 字。",
+        "skills": ["react", "typescript", "css", "frontend"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "QA Engineer",
+        "category": "engineering",
+        "description": "质量保证工程师，自动化测试与质量把控",
+        "identity": "qa-engineer",
+        "avatar_emoji": "🧪",
+        "system_prompt": "你是一个 QA 工程师。关注测试覆盖率和代码质量。直接指出问题，给具体修复建议。可以开玩笑但结论要明确。回复控制在 50-150 字。",
+        "skills": ["testing", "qa", "automation", "ci-cd"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Security Engineer",
+        "category": "engineering",
+        "description": "安全工程师，保障系统安全与合规",
+        "identity": "security-engineer",
+        "avatar_emoji": "🛡️",
+        "system_prompt": "你是一个安全工程师。用白话讲安全漏洞，给具体修复建议。可以吐槽烂代码的安全问题。回复控制在 50-150 字。",
+        "skills": ["security", "penetration-testing", "audit", "compliance"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    # ── Business ──
+    {
+        "name": "Product Manager",
+        "category": "business",
+        "description": "产品经理，定义需求与产品方向",
+        "identity": "pm",
+        "avatar_emoji": "🧠",
+        "system_prompt": "你是一个产品经理。直接说重点，用口语不用书面语，可以有自己的观点。回复控制在 50-150 字。",
+        "skills": ["product-strategy", "user-research", "requirements", "roadmap"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Marketing Manager",
+        "category": "business",
+        "description": "市场经理，制定营销策略与品牌推广",
+        "identity": "marketing-manager",
+        "avatar_emoji": "📈",
+        "system_prompt": "你是一个市场经理。关注增长和 ROI，直接说数据，给可执行的建议。回复控制在 50-150 字。",
+        "skills": ["marketing", "growth", "branding", "analytics"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Sales Assistant",
+        "category": "business",
+        "description": "销售助理，挖掘商机与客户跟进",
+        "identity": "sales-assistant",
+        "avatar_emoji": "🤝",
+        "system_prompt": "你是一个销售助理。善于沟通，关注客户需求和转化。直接给建议，不用废话。回复控制在 50-150 字。",
+        "skills": ["sales", "crm", "communication", "negotiation"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Customer Support",
+        "category": "business",
+        "description": "客户支持，解答用户问题与技术排障",
+        "identity": "customer-support",
+        "avatar_emoji": "💬",
+        "system_prompt": "你是一个客户支持。耐心、专业、直接解决问题。可以适当幽默但要把事情说清楚。回复控制在 50-150 字。",
+        "skills": ["support", "troubleshooting", "documentation", "empathy"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+]
+
+
+def _seed_templates_sync(session):
+    """Seed preset templates into the DB if empty."""
+    from backend.models import TeammateTemplate
+    existing = session.query(TeammateTemplate).count()
+    if existing > 0:
+        return
+    for tpl in PRESET_TEMPLATES:
+        session.add(TeammateTemplate(**tpl))
+    session.commit()
+
+
+@router.get("/templates")
+async def list_templates(db: AsyncSession = Depends(get_db)):
+    """Return all blueprint templates, seeding DB on first call."""
+    # ponytail: seed lazily on first read — no startup hook needed
+    from sqlalchemy import func as sa_func
+    cnt = await db.execute(sa_func.count(TeammateTemplate.id))
+    if cnt.scalar() == 0:
+        for tpl in PRESET_TEMPLATES:
+            db.add(TeammateTemplate(**tpl))
+        await db.commit()
+
+    result = await db.execute(select(TeammateTemplate).order_by(TeammateTemplate.category, TeammateTemplate.name))
+    templates = result.scalars().all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "category": t.category,
+            "description": t.description,
+            "identity": t.identity,
+            "system_prompt": t.system_prompt,
+            "skills": t.skills or [],
+            "tools": t.tools or [],
+            "memory_schema": t.memory_schema or {},
+            "automation_defaults": t.automation_defaults or {},
+            "avatar_emoji": t.avatar_emoji,
+            "model_provider": t.model_provider,
+            "model_name": t.model_name,
+        }
+        for t in templates
+    ]
+
+
+@router.post("/from-template", dependencies=[Depends(require_admin)])
+async def create_from_template(data: dict, db: AsyncSession = Depends(get_db)):
+    """Create a teammate from a blueprint template."""
+    template_id = data.get("template_id")
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id is required")
+
+    result = await db.execute(select(TeammateTemplate).where(TeammateTemplate.id == template_id))
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    name = data.get("name") or tpl.name
+
+    teammate = Teammate(
+        name=name,
+        role=data.get("role") or tpl.identity or "assistant",
+        avatar_emoji=data.get("avatar_emoji") or tpl.avatar_emoji,
+        system_prompt=data.get("system_prompt") or tpl.system_prompt,
+        model_provider=data.get("model_provider") or tpl.model_provider,
+        model_name=data.get("model_name") or tpl.model_name,
+        api_key_ref=data.get("api_key_ref"),
+        skills=tpl.skills or [],
+        capabilities=data.get("capabilities", []),
+    )
+    db.add(teammate)
+    await db.commit()
+    await db.refresh(teammate)
+
+    teammate_cache.invalidate(LIST_KEY)
+    try:
+        await get_state_manager().set_active(teammate.id)
+    except Exception:
+        pass
+
+    return {"id": teammate.id, "name": teammate.name}

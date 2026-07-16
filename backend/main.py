@@ -61,7 +61,9 @@ async def lifespan(app: FastAPI):
     task_manager.spawn(sync_models(), "startup_model_sync")
     task_manager.spawn(_periodic_model_sync(), "periodic_model_sync")
     from backend.routes.automation import automation_poll_loop
-    from backend.routes.automation_v2 import automation_v2_poll_loop
+    from backend.routes.automation_v2 import automation_v2_poll_loop, reap_orphaned_runs
+    # Reclaim runs that died with the previous process (fire-and-forget create_task).
+    await reap_orphaned_runs()
     task_manager.spawn(automation_poll_loop(interval=30), "automation_poll")
     task_manager.spawn(automation_v2_poll_loop(interval=60), "automation_v2_poll")
 

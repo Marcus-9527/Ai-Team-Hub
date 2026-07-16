@@ -20,6 +20,43 @@ from backend.models import AutomationJobModel, AutomationRunModel, gen_uuid, utc
 logger = logging.getLogger("routes.automation_v2")
 router = APIRouter(prefix="/api/automation-jobs", tags=["automation-v2"])
 
+# Tunables — normal B-batch runs finish in ~10-30s; 5min is a conservative ceiling.
+AUTOMATION_RUN_TIMEOUT_SEC = int(
+    __import__("os").environ.get("AUTOMATION_RUN_TIMEOUT_SEC", "300")
+)
+# Stale threshold for orphan reclaim on startup. Restart loses in-flight create_task coroutines.
+AUTOMATION_ORPHAN_STALE_MIN = int(
+    __import__("os").environ.get("AUTOMATION_ORPHAN_STALE_MIN", "15")
+)
+
+
+async def reap_orphaned_runs():
+    """On startup, any run still 'running' and older than the stale threshold can
+    never recover — its fire-and-forget coroutine died with the previous process.
+    Mark it failed with a traceable reason so it doesn't pollute future diagnostics."""
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=AUTOMATION_ORPHAN_STALE_MIN)
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(AutomationRunModel).where(
+                    AutomationRunModel.status == "running",
+                    AutomationRunModel.started_at < cutoff,
+                )
+            )
+            stale = result.scalars().all()
+            for r in stale:
+                r.status = "failed"
+                r.error = "orphaned-by-restart"
+                r.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            if stale:
+                logger.warning("[AUTOv2] reaped %d orphaned run(s): %s",
+                               len(stale), [s.id[:8] for s in stale])
+    except Exception as e:
+        logger.warning("[AUTOv2] orphan reap failed: %s", e)
+
 
 # ── Schemas ──
 
@@ -209,7 +246,12 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
             runtime = ExecutionRuntime(max_workers=4)
             await runtime.start()
             orch = TaskOrchestrator(runtime=runtime)
-            await orch.start_task(db, task.id, job.goal or job.name)
+            # Hard ceiling: a task that can't finish in AUTOMATION_RUN_TIMEOUT_SEC
+            # is hung (e.g. stuck LLM call) — fail it instead of stalling forever.
+            await asyncio.wait_for(
+                orch.start_task(db, task.id, job.goal or job.name),
+                timeout=AUTOMATION_RUN_TIMEOUT_SEC,
+            )
 
             # Update run record
             db_run.status = "completed" if getattr(task, "status", "") == "COMPLETED" else "failed"
@@ -221,6 +263,18 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
             await db.commit()
 
             logger.info("[AUTOv2] job '%s' → task %s → %s", job.name[:30], task.id[:8], db_run.status)
+    except asyncio.TimeoutError:
+        logger.error("[AUTOv2] job '%s' timed out after %ss", job.name[:30], AUTOMATION_RUN_TIMEOUT_SEC)
+        try:
+            async with async_session() as db:
+                db_run = await db.get(AutomationRunModel, run.id)
+                if db_run:
+                    db_run.status = "failed"
+                    db_run.error = "execution-timeout"
+                    db_run.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception:
+            pass
     except Exception as e:
         logger.error("[AUTOv2] job '%s' failed: %s", job.name[:30], e)
         try:

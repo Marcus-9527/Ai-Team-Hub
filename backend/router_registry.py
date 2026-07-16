@@ -11,11 +11,11 @@ def register_routers(app: FastAPI) -> None:
 
 
 def _register_core(app: FastAPI):
-    from backend.routes import channels, teammates, apikeys, messages, models, files, query, team_files, tasks
+    from backend.routes import channels, teammates, apikeys, messages, models, files, query, team_files, tasks, board_tasks
     from backend.routes.auth import router as auth_router
     for router in (channels.router, teammates.router, apikeys.router, messages.router,
                    models.router, files.router, query.router, team_files.router,
-                   tasks.router, auth_router):
+                   tasks.router, board_tasks.router, auth_router):
         app.include_router(router)
 
 

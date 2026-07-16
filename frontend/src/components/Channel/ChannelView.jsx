@@ -7,6 +7,10 @@ import {
   Circle, CheckCircle2, ListTodo, PlayCircle,
 } from 'lucide-react';
 import * as api from '../../services/api';
+import { toast } from '../../services/toast';
+import {
+  listBoardTasks, createBoardTask, claimBoardTask, updateBoardTask,
+} from '../../services/api';
 import { parseSSEBuffer } from '../../services/eventBus';
 import { useTranslation } from '../../i18n';
 import { dispatchTaskEvent, isTaskEventType } from '../../services/taskEventBus';
@@ -29,6 +33,56 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
   const [mentionStartPos, setMentionStartPos] = useState(-1);
   const [selectedMentionIdx, setSelectedMentionIdx] = useState(0);
 
+  // ── Phase 28: Board task panel state ──
+  const [tasks, setTasks] = useState([]);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+
+  const loadTasks = async () => {
+    try {
+      const data = await listBoardTasks(channelId);
+      setTasks(Array.isArray(data) ? data : []);
+    } catch (e) { console.error('[BoardTask] load failed', e); }
+  };
+
+  // Optimistic claim: update UI immediately, roll back on 409 (already claimed).
+  const handleClaim = async (task) => {
+    const snapshot = tasks;
+    const optimistic = tasks.map(t => t.id === task.id
+      ? { ...t, assignee_id: 'me', assignee_name: '我', status: 'in_progress' }
+      : t);
+    setTasks(optimistic);
+    try {
+      const updated = await claimBoardTask(task.id, 'me', '我');
+      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+    } catch (e) {
+      setTasks(snapshot); // roll back
+      if (String(e.message).includes('409') || String(e.message).includes('already claimed')) {
+        toast('该任务已被认领');
+      }
+    }
+  };
+
+  const handleComplete = async (task) => {
+    const snapshot = tasks;
+    const optimistic = tasks.map(t => t.id === task.id ? { ...t, status: 'done' } : t);
+    setTasks(optimistic);
+    try {
+      const updated = await updateBoardTask(task.id, { status: 'done' });
+      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+    } catch (e) { setTasks(snapshot); }
+  };
+
+  const handleAddTask = async () => {
+    const title = newTaskTitle.trim();
+    if (!title) return;
+    try {
+      const created = await createBoardTask({ title, channel_id: channelId, created_by: 'me' });
+      setTasks(prev => [created, ...prev]);
+      setNewTaskTitle('');
+    } catch (e) { console.error('[BoardTask] create failed', e); }
+  };
+
   useEffect(() => { loadChannel(); }, [channelId, refreshKey]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
@@ -49,6 +103,7 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
       const map = {};
       allTeammates.forEach(tm => { map[tm.id] = tm; });
       setTeammatesById(map);
+      loadTasks();
     } catch (e) { console.error(e); }
   };
 
@@ -385,8 +440,9 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
   };
 
   return (
-    <>
-    <div className="flex-1 flex flex-col h-full bg-canvas">
+    <div className="flex-1 flex h-full bg-canvas">
+      {/* Main chat column */}
+      <div className="flex-1 flex flex-col h-full min-w-0">
       {/* Channel Header with Member List */}
       <div className="h-auto min-h-14 flex flex-col border-b border-hairline bg-surface/80 backdrop-blur-sm flex-shrink-0">
         <div className="flex items-center gap-3 px-5 py-2.5">
@@ -399,6 +455,13 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
               <Users size={12} />
               <span>{channelTeammates.length}</span>
             </div>
+            <button
+              onClick={() => { setShowTaskBoard(v => !v); if (!tasks.length) loadTasks(); }}
+              className={`p-1.5 rounded-lg transition-all ${showTaskBoard ? 'bg-primary/15 text-primary' : 'hover:bg-surface-hover text-ink-faint hover:text-ink'}`}
+              title="任务看板"
+            >
+              <ListTodo size={16} />
+            </button>
             <div className="relative">
               <button
                 onClick={() => setShowActions(!showActions)}
@@ -579,9 +642,73 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
           </div>
         )}
       </div>
+      {/* ── Phase 28: Board task side panel ── */}
+      {showTaskBoard && (
+        <div className="w-72 flex-shrink-0 h-full border-l border-hairline bg-surface/60 flex flex-col">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-hairline">
+            <ListTodo size={15} className="text-primary" />
+            <h3 className="font-bold text-sm text-ink">任务看板</h3>
+            <span className="ml-auto text-xs text-ink-faint">{tasks.length}</span>
+          </div>
+          <div className="p-3 border-b border-hairline">
+            <div className="flex items-center gap-2">
+              <input
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddTask(); }}
+                placeholder="新建任务..."
+                className="flex-1 bg-canvas border border-hairline rounded-lg px-2.5 py-1.5 text-sm text-ink placeholder-ink-faint focus:outline-none focus:border-primary/50"
+              />
+              <button
+                onClick={handleAddTask}
+                className="w-8 h-8 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 flex items-center justify-center flex-shrink-0 transition-colors"
+                title="添加"
+              >+</button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {tasks.length === 0 && (
+              <p className="text-xs text-ink-faint text-center mt-8">暂无任务</p>
+            )}
+            {tasks.map(task => (
+              <div key={task.id} className="bg-canvas border border-hairline rounded-xl p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                    task.status === 'done' ? 'bg-emerald-500/10 text-emerald-400'
+                    : task.status === 'in_progress' ? 'bg-amber-500/10 text-amber-400'
+                    : 'bg-surface-hover text-ink-faint'
+                  }`}>
+                    {task.status === 'done' ? '已完成' : task.status === 'in_progress' ? '进行中' : '待认领'}
+                  </span>
+                  <p className={`text-sm flex-1 ${task.status === 'done' ? 'line-through text-ink-faint' : 'text-ink'}`}>
+                    {task.title}
+                  </p>
+                </div>
+                {task.assignee_name && (
+                  <p className="text-[11px] text-ink-faint">认领人：{task.assignee_name}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  {!task.assignee_id && task.status !== 'done' && (
+                    <button
+                      onClick={() => handleClaim(task)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-xs font-semibold transition-colors"
+                    >认领</button>
+                  )}
+                  {task.status !== 'done' && (
+                    <button
+                      onClick={() => handleComplete(task)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-surface-hover text-ink-mute hover:text-emerald-400 text-xs transition-colors"
+                      title="标记完成"
+                    ><CheckCircle2 size={13} />完成</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      </div>
     </div>
-
-    </>
   );
 }
 

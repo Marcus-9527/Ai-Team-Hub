@@ -5,6 +5,7 @@ import ChatLayout from './components/ChatLayout';
 import SettingsPanel from './components/Settings/SettingsPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listChannels } from './services/api';
+import { dismissAll } from './services/toast';
 
 // 非首屏视图懒加载,拆分到各自的 chunk
 const NewTopicPage = lazy(() => import('./components/NewTopic/NewTopicPage'));
@@ -17,11 +18,10 @@ const BrainPage = lazy(() => import('./components/Brain/BrainPage'));
 const ProposalApprovalPage = lazy(() => import('./components/Brain/ProposalApprovalPage'));
 const ApprovalQueuePage = lazy(() => import('./components/Approval/ApprovalQueuePage'));
 const AutonomousCenter = lazy(() => import('./components/Autonomous/AIOpsCenter'));
-const AutomationJobsPage = lazy(() => import('./components/Autonomous/AutomationJobsPage'));
 const ExecutionRoom = lazy(() => import('./components/Execution/ExecutionRoom'));
 const WorkspaceExplorer = lazy(() => import('./components/Workspace/WorkspaceExplorer'));
 const SystemHealthView = lazy(() => import('./components/SystemHealth/SystemHealth'));
-const TemplateGallery = lazy(() => import('./components/Templates/TemplateGallery'));
+
 
 function ViewFallback() {
   return <div className="flex-1 flex items-center justify-center text-gray-400">加载中…</div>;
@@ -38,6 +38,7 @@ export default function AppShell({ onNavigateToLanding }) {
   const handleNavigate = useCallback(
     (newView) => {
       setShowSettings(false);
+      dismissAll();
       if (newView === 'chat') {
         if (!channelId) {
           listChannels()
@@ -89,7 +90,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'tasks') {
     viewKey = 'tasks-' + refreshKey;
     ViewComponent = TaskModeView;
-    viewProps = {};
+    viewProps = { onNavigate: handleNavigate };
   } else if (view === 'projects') {
     viewKey = 'projects-' + refreshKey;
     ViewComponent = ProjectsPage;
@@ -98,6 +99,10 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'inbox-' + refreshKey;
     ViewComponent = InboxPage;
     viewProps = { onNavigate: handleNavigate, setChannelId };
+  } else if (view === 'brain') {
+    viewKey = 'brain-' + refreshKey;
+    ViewComponent = BrainPage;
+    viewProps = {};
   } else if (view === 'team') {
     viewKey = 'team-' + refreshKey;
     ViewComponent = TeamPage;
@@ -106,10 +111,6 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'dashboard-' + refreshKey;
     ViewComponent = DashboardPage;
     viewProps = { onBack: () => setView('inbox') };
-  } else if (view === 'brain') {
-    viewKey = 'brain-' + refreshKey;
-    ViewComponent = BrainPage;
-    viewProps = {};
   } else if (view === 'proposals') {
     viewKey = 'proposals-' + refreshKey;
     ViewComponent = ProposalApprovalPage;
@@ -118,14 +119,6 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'approvals-' + refreshKey;
     ViewComponent = ApprovalQueuePage;
     viewProps = { onBack: () => setView('inbox') };
-  } else if (view === 'autonomous') {
-    viewKey = 'autonomous-' + refreshKey;
-    ViewComponent = AutonomousCenter;
-    viewProps = {};
-  } else if (view === 'automation-jobs') {
-    viewKey = 'automation-jobs-' + refreshKey;
-    ViewComponent = AutomationJobsPage;
-    viewProps = {};
   } else if (view === 'ai-ops') {
     viewKey = 'ai-ops-' + refreshKey;
     ViewComponent = AutonomousCenter;
@@ -141,10 +134,6 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'system-health') {
     viewKey = 'system-health-' + refreshKey;
     ViewComponent = SystemHealthView;
-    viewProps = {};
-  } else if (view === 'templates') {
-    viewKey = 'templates-' + refreshKey;
-    ViewComponent = TemplateGallery;
     viewProps = {};
   } else {
     viewKey = 'inbox-' + refreshKey;

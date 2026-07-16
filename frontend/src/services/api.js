@@ -209,5 +209,16 @@ export const deleteAutomationJob = (id) =>
   request(`/api/automation-jobs/${id}`, { method: 'DELETE' });
 export const triggerAutomationJob = (id) =>
   request(`/api/automation-jobs/${id}/trigger`, { method: 'POST' });
-export const listAutomationRuns = (jobId) =>
-  request(`/api/automation-jobs/${jobId}/runs`);
+// ── Board Tasks (Phase 28: claim board) ──
+export const listBoardTasks = (channelId) =>
+  request(`/api/channels/${channelId}/tasks`);
+export const createBoardTask = (data) =>
+  request('/api/board-tasks', { method: 'POST', body: JSON.stringify(data) });
+export const updateBoardTask = (id, data) =>
+  request(`/api/board-tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+export const claimBoardTask = (id, assigneeId, assigneeName = '') =>
+  request(`/api/board-tasks/${id}/claim`, {
+    method: 'PATCH',
+    body: JSON.stringify({ assignee_id: assigneeId, assignee_name: assigneeName }),
+  });
+

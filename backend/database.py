@@ -57,6 +57,7 @@ async def init_db():
     from backend.models import DAGNodeModel  # noqa: F401
     from backend.models import PolicyDecisionModel  # noqa: F401
     from backend.models import TeammateTemplate  # noqa: F401
+    from backend.models import BoardTask  # noqa: F401
     from backend.models import User, Workspace, WorkspaceMember  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -100,6 +101,19 @@ async def _migrate_columns() -> None:
         ],
         "task_steps": [
             ("deps", "JSON", "[]"),
+        ],
+        "board_tasks": [
+            ("workspace_id", "VARCHAR", None),
+            ("channel_id", "VARCHAR", None),
+            ("source_message_id", "VARCHAR", None),
+            ("title", "VARCHAR", None),
+            ("description", "TEXT", ""),
+            ("status", "VARCHAR", "open"),
+            ("priority", "INTEGER", "2"),
+            ("assignee_id", "VARCHAR", None),
+            ("assignee_name", "VARCHAR", None),
+            ("created_by", "VARCHAR", "system"),
+            ("completed_at", "DATETIME", None),
         ],
     }
 

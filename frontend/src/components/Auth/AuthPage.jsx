@@ -3,8 +3,6 @@ import { login, register } from '../../services/api';
 import { setSession } from '../../services/auth';
 import { toast } from '../../services/toast';
 
-const RED = '#fc1c46';
-
 export default function AuthPage({ onAuth }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
@@ -32,31 +30,31 @@ export default function AuthPage({ onAuth }) {
   return (
     <div
       style={{
-        background: '#000',
-        color: '#fff',
+        background: '#4a154b',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontFamily: "'Source Serif 4', serif",
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
       <form
         onSubmit={submit}
         style={{
-          width: 320,
-          border: '1px solid #222',
-          borderRadius: 12,
-          padding: 28,
+          width: 360,
+          background: '#ffffff',
+          borderRadius: 16,
+          padding: 32,
           display: 'flex',
           flexDirection: 'column',
           gap: 14,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
         }}
       >
-        <h1 style={{ fontFamily: "'Playfair Display', serif", margin: 0, fontSize: 26 }}>
+        <h1 style={{ fontFamily: "'Inter', sans-serif", margin: 0, fontSize: 24, fontWeight: 800, color: '#1d1d1d', letterSpacing: '-0.02em' }}>
           AI Team Hub
         </h1>
-        <p style={{ margin: 0, color: '#888', fontSize: 13 }}>
+        <p style={{ margin: 0, color: '#9ca3af', fontSize: 13 }}>
           {mode === 'login' ? '登录到你的工作区' : '注册新账号'}
         </p>
 
@@ -90,13 +88,14 @@ export default function AuthPage({ onAuth }) {
           type="submit"
           disabled={busy}
           style={{
-            background: RED,
+            background: '#4a154b',
             color: '#fff',
             border: 'none',
             borderRadius: 999,
             padding: '10px 0',
             cursor: 'pointer',
             fontWeight: 600,
+            fontSize: 14,
           }}
         >
           {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}
@@ -105,7 +104,7 @@ export default function AuthPage({ onAuth }) {
         <button
           type="button"
           onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-          style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 13 }}
+          style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 13, padding: '4px 0' }}
         >
           {mode === 'login' ? '没有账号?去注册' : '已有账号?去登录'}
         </button>
@@ -115,11 +114,11 @@ export default function AuthPage({ onAuth }) {
 }
 
 const inputStyle = {
-  background: '#111',
-  border: '1px solid #333',
-  borderRadius: 8,
+  background: '#faf8f5',
+  border: '1px solid #e8e4df',
+  borderRadius: 10,
   padding: '10px 12px',
-  color: '#fff',
+  color: '#1d1d1d',
   fontSize: 14,
   outline: 'none',
 };

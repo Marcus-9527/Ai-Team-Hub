@@ -1307,3 +1307,58 @@ class TeammateTemplate(Base):
     model_provider = Column(String, default="openrouter")
     model_name = Column(String, default="openrouter/auto")
     created_at = Column(DateTime, default=utcnow)
+
+
+# ═══════════════════════════════════════════════════════════
+# Board Task — lightweight claim board (Phase 28)
+#   Distinct from the heavy `tasks` execution-engine table: no DAG / steps /
+#   TechLead / replan. This is a plain to-do board scoped to a workspace, with
+#   a single optimistically-locked assignee for concurrency-safe claiming.
+# ═══════════════════════════════════════════════════════════
+
+class BoardTask(Base):
+    """A lightweight, claimable task on a channel's board.
+
+    Severely trimmed vs the execution-engine `tasks` table — no steps, DAG,
+    replan, or review. One assignee, optimistic-lock claim (WHERE assignee_id
+    IS NULL → rowcount==0 means lost the race → 409).
+    """
+    __tablename__ = "board_tasks"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    workspace_id = Column(String, nullable=False, index=True)  # ponytail: scope is mandatory
+    channel_id = Column(
+        String,
+        ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    source_message_id = Column(String, nullable=True, index=True)  # trace back to originating message
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    status = Column(String, nullable=False, default="open", index=True)  # open | in_progress | done
+    priority = Column(Integer, default=2)  # 1 high … 3 low
+    assignee_id = Column(String, nullable=True, index=True)  # NULL = unclaimed; claim sets this
+    assignee_name = Column(String, nullable=True)
+    created_by = Column(String, nullable=False, default="system")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "channel_id": self.channel_id,
+            "source_message_id": self.source_message_id,
+            "title": self.title,
+            "description": self.description or "",
+            "status": self.status,
+            "priority": self.priority,
+            "assignee_id": self.assignee_id,
+            "assignee_name": self.assignee_name,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }

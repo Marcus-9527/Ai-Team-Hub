@@ -6,6 +6,7 @@ export default function ToastHost() {
 
   useEffect(() => {
     return onToast((t) => {
+      if (t._clear) { setItems([]); return; }
       setItems((prev) => [...prev, t]);
       setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), 5000);
     });

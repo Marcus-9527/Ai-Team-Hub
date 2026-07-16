@@ -10,3 +10,7 @@ export function toast(message, type = 'error') {
   const item = { id: Date.now() + Math.random(), message, type };
   listeners.forEach((fn) => fn(item));
 }
+
+export function dismissAll() {
+  listeners.forEach((fn) => fn({ _clear: true }));
+}

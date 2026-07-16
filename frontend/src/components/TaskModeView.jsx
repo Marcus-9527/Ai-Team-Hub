@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Target, Loader2, PlayCircle,
+  Target, Loader2, PlayCircle, MessageSquare,
 } from 'lucide-react';
 import * as taskApi from '../services/api/task';
 import { useTranslation } from '../i18n';
@@ -9,7 +9,7 @@ import TaskDetailView from './Task/TaskDetailView';
 import TaskProgressPanel from './Task/TaskProgressPanel';
 
 /* ── Goal input (initial state) ── */
-function GoalInput({ onSubmit, loading }) {
+function GoalInput({ onSubmit, loading, onOpenTopic }) {
   const t = useTranslation();
   const [goal, setGoal] = useState('');
 
@@ -52,13 +52,19 @@ function GoalInput({ onSubmit, loading }) {
             {t('task.goal.start')}
           </button>
         </div>
+        <button
+          onClick={onOpenTopic}
+          className="w-full mt-3 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-hairline text-xs font-medium text-ink-mute hover:bg-surface-hover transition-all"
+        >
+          <MessageSquare size={14} /> 或开始一个对话话题（群聊模式）
+        </button>
       </motion.div>
     </div>
   );
 }
 
 /* ── TaskModeView: main export ── */
-export default function TaskModeView() {
+export default function TaskModeView({ onNavigate }) {
   const t = useTranslation();
   const [task, setTask] = useState(null);
   const [steps, setSteps] = useState([]);
@@ -124,7 +130,7 @@ export default function TaskModeView() {
   return (
     <div className="flex-1 flex flex-col h-full">
       {!task ? (
-        <GoalInput onSubmit={handleSubmitGoal} loading={creating} />
+        <GoalInput onSubmit={handleSubmitGoal} loading={creating} onOpenTopic={() => onNavigate?.('new-topic')} />
       ) : (
         <TaskProgressPanel
           task={task}

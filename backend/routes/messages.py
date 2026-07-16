@@ -680,6 +680,15 @@ async def _save_team_response_from_events(
         except Exception as mem_err:
             logger.debug(f"[MEMORY] Chat memory write skipped: {mem_err}")
 
+        # ── Phase 28: parse AI reply for explicit [TASK] directives → board ──
+        # ponytail: best-effort. A parse failure must never break message save.
+        try:
+            from backend.services.board_task_parser import create_board_tasks_from_reply
+            full_reply = " | ".join(r["content"] for r in responses.values())
+            await create_board_tasks_from_reply(channel_id, full_reply, created_by="ai")
+        except Exception as board_err:
+            logger.debug(f"[BOARD-TASK] directive parse skipped: {board_err}")
+
     except Exception as e:
         logger.error(f"Failed to save team response: {e}", exc_info=True)
 

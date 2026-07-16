@@ -11,6 +11,7 @@ import {
   AlertCircle, CheckCircle2, Activity, Loader2,
 } from 'lucide-react';
 import * as api from '../../services/api';
+import AutomationJobsPage from './AutomationJobsPage';
 
 const STATE_DOT = {
   thinking: '#818cf8',
@@ -33,6 +34,7 @@ export default function AIOpsCenter() {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState(null);
+  const [tab, setTab] = useState('overview');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,7 +47,7 @@ export default function AIOpsCenter() {
       setProposals(prop.proposals || []);
       // Load recent executions
       try {
-        const stats = await api.fetch('/api/executions/stats').catch(() => null);
+        const stats = await request('/api/executions/stats').catch(() => null);
         if (stats) setRuns(stats.recent_runs || []);
       } catch {}
     } catch (e) { console.error(e); }
@@ -84,6 +86,18 @@ export default function AIOpsCenter() {
           <div className="flex items-center gap-3">
             <Zap size={24} style={{ color: 'var(--color-primary)' }} />
             <h1 className="text-xl font-bold" style={{ color: 'var(--color-ink)' }}>AI 自动化</h1>
+            <div className="flex gap-1 ml-4">
+              <button onClick={() => setTab('overview')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${tab === 'overview' ? 'text-white' : 'opacity-60 hover:opacity-100'}`}
+                style={tab === 'overview' ? { background: 'var(--color-primary)' } : { background: 'rgba(0,0,0,0.05)', color: 'var(--color-ink-faint)' }}>
+                总览
+              </button>
+              <button onClick={() => setTab('jobs')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${tab === 'jobs' ? 'text-white' : 'opacity-60 hover:opacity-100'}`}
+                style={tab === 'jobs' ? { background: 'var(--color-primary)' } : { background: 'rgba(0,0,0,0.05)', color: 'var(--color-ink-faint)' }}>
+                定时任务
+              </button>
+            </div>
           </div>
           <button
             onClick={load}
@@ -94,6 +108,10 @@ export default function AIOpsCenter() {
           </button>
         </div>
 
+        {tab === 'jobs' ? (
+          <AutomationJobsPage />
+        ) : (
+        <>
         {loading && (
           <div className="flex justify-center py-12">
             <RefreshCw size={32} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
@@ -198,6 +216,8 @@ export default function AIOpsCenter() {
             </div>
           )}
         </section>
+        </>
+        )}
       </div>
     </div>
   );

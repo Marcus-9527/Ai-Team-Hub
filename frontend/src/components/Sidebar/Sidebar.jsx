@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, FileCheck, Zap, X, BrainCircuit, Target, Bot, LogOut } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, Inbox, ListTodo, Users, Zap, X, BrainCircuit, LogOut } from 'lucide-react';
 import { clearSession } from '../../services/auth';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
@@ -8,14 +8,11 @@ import CreateTeammateModal from '../Teammate/CreateTeammateModal';
 import ConfirmDialog from '../ConfirmDialog';
 
 const NAV_ITEMS = [
-  { view: 'new-topic', icon: Target,       label: '工作区' },
-  { view: 'inbox',     icon: Inbox,         label: '收件箱' },
-  { view: 'tasks',     icon: ListTodo,      label: '任务' },
-  { view: 'team',      icon: Users,         label: '团队' },
-  { view: 'brain',     icon: BrainCircuit,  label: '知识库' },
-  { view: 'ai-ops',    icon: Zap,           label: '自动化' },
-  { view: 'automation-jobs', icon: Bot,     label: 'AI员工' },
-  { view: 'templates', icon: FileCheck,     label: '模板库' },
+  { view: 'inbox',     icon: Inbox,        label: '收件箱' },
+  { view: 'tasks',     icon: ListTodo,     label: '任务' },
+  { view: 'team',      icon: Users,        label: '团队' },
+  { view: 'brain',     icon: BrainCircuit,  label: '队友记忆' },
+  { view: 'ai-ops',    icon: Zap,          label: '自动化' },
 ];
 
 export default function Sidebar({

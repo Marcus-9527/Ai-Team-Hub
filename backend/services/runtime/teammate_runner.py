@@ -16,6 +16,7 @@ from typing import AsyncGenerator, Optional
 
 from backend.services.ai_service import stream_ai_response
 from backend.cache import teammate_cache, apikey_cache
+from backend.services.brain.chat_memory import extract_and_store
 from backend.database import async_session
 from sqlalchemy import select
 from backend.models import APIKey
@@ -321,15 +322,20 @@ async def _workspace_active_key(workspace_id: str | None = None) -> Optional[tup
     (legacy/global fallback).
     """
     async with async_session() as sess:
-        result = await sess.execute(
-            select(APIKey).where(
-                APIKey.is_active == "1",
-                APIKey.workspace_id == (workspace_id or None),
-            ).limit(1)
-        )
-        k = result.scalar_one_or_none()
-        if k:
-            return k.id, (k.base_url or ""), k.provider
+        # ponytail: strict ws match, then any active key. teammates often
+        # have null workspace_id while keys carry a ws id, so a configured
+        # key must still resolve (mirrors messages.py _fallback_key_ref).
+        for cond in (
+            APIKey.workspace_id == (workspace_id or None),
+            APIKey.workspace_id.isnot(None),
+            APIKey.workspace_id.is_(None),
+        ):
+            result = await sess.execute(
+                select(APIKey).where(APIKey.is_active == "1", cond).limit(1)
+            )
+            k = result.scalar_one_or_none()
+            if k:
+                return k.id, (k.base_url or ""), k.provider
     return None
 
 
@@ -436,6 +442,34 @@ def _emit_event(
     return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
 
 
+def _emit_placeholder_then_error(
+    message_id: str, role: str, phase: str, teammate: dict, err: str
+) -> list[str]:
+    """Ponytail: guarantee a bubble exists before the error event.
+
+    Frontend matches the `error` event to a team bubble by message_id and only
+    then flips its status to 'error' (✗). If the stream dies before emitting any
+    teammate_message (no key / connection failure), no bubble exists and the ✗
+    never shows. Emitting an empty placeholder bubble first keeps the existing
+    frontend match logic untouched.
+    """
+    placeholder = _emit_event(
+        event_type="teammate_message",
+        message_id=message_id,
+        role=role,
+        phase=phase,
+        payload={"content": "", "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+    )
+    error = _emit_event(
+        event_type="error",
+        message_id=message_id,
+        role=role,
+        phase=phase,
+        payload={"content": f"Teammate {teammate.get('name', '?')} failed: {err}"},
+    )
+    return [placeholder, error]
+
+
 async def stream_teammate(
     teammate: dict,
     user_message: str,
@@ -443,6 +477,7 @@ async def stream_teammate(
     turn_idx: int,
     phase: str,
     shared_attachment_context: Optional[dict] = None,
+    channel_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """
     Run a single teammate with SSE streaming.
@@ -451,6 +486,11 @@ async def stream_teammate(
     role = detect_role(teammate)
     api_key_val, base_url_val, resolved_provider, fallback_model = await resolve_api_key(teammate)
     if not api_key_val:
+        for ev in _emit_placeholder_then_error(
+            message_id=str(uuid.uuid4()), role=role, phase=phase,
+            teammate=teammate, err="no API key configured",
+        ):
+            yield ev
         return
 
     # ponytail: when we fell back to a workspace key, the teammate's stored
@@ -462,6 +502,17 @@ async def stream_teammate(
     brain_prompt = await get_brain_loader().build_prompt(
         teammate.get("id", ""), query=user_message,
     )
+    # 聊天记忆注入：best-effort，失败跳过（不阻塞对话）
+    try:
+        from backend.services.brain.fragment_store import get_brain_fragment_store, BrainFragmentType
+        chat_mem = await get_brain_fragment_store().recent_chat_memory(
+            teammate.get("id", ""), teammate.get("workspace_id", ""), limit=8,
+        )
+        if chat_mem:
+            lines = "\n".join(f"  - {m.content}" for m in chat_mem)
+            brain_prompt = (brain_prompt + f"\n\n## CHAT MEMORY（你之前在这个工作区记住的）\n{lines}").strip()
+    except Exception as e:
+        logger.warning("[ChatMemory] injection skipped (msg still flows): %s", e)
     prompt = build_turn_prompt(teammate, user_message, history_texts, turn_idx, shared_attachment_context, brain_prompt=brain_prompt)
 
     early_buffer = ""
@@ -501,13 +552,11 @@ async def stream_teammate(
                 continue
     except Exception as e:
         logger.warning(f"Teammate {teammate.get('name', '?')} ({role}) stream failed: {e}")
-        yield _emit_event(
-            event_type="error",
-            message_id=message_id,
-            role=role,
-            phase=phase,
-            payload={"content": f"Teammate {teammate.get('name', '?')} failed: {e}"},
-        )
+        for ev in _emit_placeholder_then_error(
+            message_id=message_id, role=role, phase=phase,
+            teammate=teammate, err=str(e),
+        ):
+            yield ev
         return
 
     full_text = full_text.strip()
@@ -545,6 +594,8 @@ Give YOUR personal perspective in 2-3 sentences. Do NOT say "no new info" — ju
                 phase=phase,
                 payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
             )
+            # 聊天记忆：best-effort 异步提炼，不阻塞主流程
+            extract_and_store(teammate, user_message, retry_full.strip(), channel_id)
         except Exception as e:
             logger.warning(f"Teammate {teammate.get('name', '?')} retry failed: {e}")
             yield _emit_event(
@@ -564,3 +615,5 @@ Give YOUR personal perspective in 2-3 sentences. Do NOT say "no new info" — ju
             phase=phase,
             payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
         )
+        # 聊天记忆：best-effort 异步提炼，不阻塞主流程
+        extract_and_store(teammate, user_message, full_text, channel_id)

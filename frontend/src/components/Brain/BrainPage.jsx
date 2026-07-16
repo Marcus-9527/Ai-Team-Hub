@@ -14,6 +14,7 @@ const TYPE_LABELS = {
   'brain:preferences': '偏好 Preferences',
   'brain:behavior_suggestion': '行为建议',
   'brain:proposal': '待批准修改',
+  'brain:channel_summary': '频道摘要',
 };
 
 const TYPE_ICONS = {
@@ -27,9 +28,10 @@ const TYPE_ICONS = {
   'brain:preferences': '⭐',
   'brain:behavior_suggestion': '💡',
   'brain:proposal': '🔔',
+  'brain:channel_summary': '📡',
 };
 
-export default function BrainPage({ onBack, lang }) {
+export default function BrainPage({ onBack, lang, channelId }) {
   const [teammates, setTeammates] = useState([]);
   const [selectedTm, setSelectedTm] = useState(null);
   const [fragments, setFragments] = useState([]);
@@ -39,6 +41,10 @@ export default function BrainPage({ onBack, lang }) {
   const [rollbacking, setRollbacking] = useState(null);
   const [promptPreview, setPromptPreview] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
+  const [channelSummary, setChannelSummary] = useState(null);
+  const [channelSummaryLoading, setChannelSummaryLoading] = useState(false);
+  const [chatMemories, setChatMemories] = useState([]);
+  const [chatMemLoading, setChatMemLoading] = useState(true);
 
   useEffect(() => {
     api.listTeammates().then(tms => {
@@ -46,6 +52,24 @@ export default function BrainPage({ onBack, lang }) {
       if (tms.length > 0) selectTeammate(tms[0]);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    api.listChatMemories()
+      .then(d => setChatMemories(d.items || []))
+      .catch(() => setChatMemories([]))
+      .finally(() => setChatMemLoading(false));
+  }, []);
+
+  const tmName = (id) => teammates.find(t => t.id === id)?.name || '未知队友';
+
+  useEffect(() => {
+    if (!channelId) { setChannelSummary(null); return; }
+    setChannelSummaryLoading(true);
+    api.getChannelSummary(channelId)
+      .then(data => setChannelSummary(data))
+      .catch(() => setChannelSummary(null))
+      .finally(() => setChannelSummaryLoading(false));
+  }, [channelId]);
 
   const selectTeammate = async (tm) => {
     setSelectedTm(tm);
@@ -100,6 +124,37 @@ export default function BrainPage({ onBack, lang }) {
           AI 队友的长期知识库 — 包含身份、经验、技能、决策等持久化片段
         </p>
 
+        {/* Channel summary panel */}
+        {channelId && (
+          <div className="rounded-xl p-4" style={{ border: '1px solid rgba(252,28,70,0.2)', background: 'rgba(252,28,70,0.04)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-ink)' }}>
+                <span>📡</span> 当前频道摘要
+              </h3>
+              {channelSummary?.updated_at && (
+                <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                  {new Date(channelSummary.updated_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {channelSummaryLoading ? (
+              <div className="flex items-center gap-2 py-2" style={{ color: 'var(--color-ink-faint)' }}>
+                <Loader2 className="animate-spin" size={16} />
+                <span className="text-xs">加载中…</span>
+              </div>
+            ) : channelSummary ? (
+              <pre className="text-xs leading-relaxed whitespace-pre-wrap rounded-lg p-3 max-h-60 overflow-y-auto"
+                style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--color-ink-faint)' }}>
+                {channelSummary.content}
+              </pre>
+            ) : (
+              <p className="text-xs py-2" style={{ color: 'var(--color-ink-faint)' }}>
+                该频道暂无任务记录，完成任务后自动生成摘要。
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Teammate selector */}
         <div className="flex flex-wrap gap-2">
           {teammates.map(tm => (
@@ -117,6 +172,40 @@ export default function BrainPage({ onBack, lang }) {
               {tm.name}
             </button>
           ))}
+        </div>
+
+        {/* Chat memory list (Task 7) */}
+        <div className="rounded-xl p-4" style={{ border: '1px solid rgba(252,28,70,0.2)', background: 'rgba(252,28,70,0.04)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--color-ink)' }}>
+              <Bot size={14} style={{ color: 'var(--color-primary)' }} /> 聊天记忆（本轮对话自动提炼）
+            </h3>
+            <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{chatMemories.length} 条</span>
+          </div>
+          {chatMemLoading ? (
+            <div className="flex items-center gap-2 py-2" style={{ color: 'var(--color-ink-faint)' }}>
+              <Loader2 className="animate-spin" size={16} />
+              <span className="text-xs">加载中…</span>
+            </div>
+          ) : chatMemories.length === 0 ? (
+            <p className="text-xs py-2" style={{ color: 'var(--color-ink-faint)' }}>
+              暂无聊天记忆。与队友对话几轮（包含事实信息如"我叫XX/项目用React"）后，这里会自动出现摘要。
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {chatMemories.map(m => (
+                <div key={m.id} className="rounded-lg p-3" style={{ background: 'rgba(0,0,0,0.25)' }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium" style={{ color: 'var(--color-primary)' }}>{tmName(m.teammate_id)}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                      {m.created_at ? new Date(m.created_at).toLocaleString() : '-'}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed" style={{ color: 'var(--color-ink-faint)' }}>{m.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Loading */}

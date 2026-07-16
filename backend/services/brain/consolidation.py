@@ -92,18 +92,22 @@ class MemoryConsolidationService:
         if not items:
             return 0
 
-        # 2. Group by teammate (from metadata) and memory type
+        # 2. Group by workspace + teammate (from metadata) and memory type
         by_teammate: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+        ws_by_teammate: dict[str, str] = {}
         for item in items:
-            tm_id = (item.metadata or {}).get("teammate_id", "")
+            meta = item.metadata or {}
+            tm_id = meta.get("teammate_id", "")
             if not tm_id:
                 continue
             by_teammate[tm_id][item.memory_type].append(item)
+            ws_by_teammate.setdefault(tm_id, meta.get("workspace_id", ""))
 
         created = 0
         for teammate_id, type_groups in by_teammate.items():
+            ws_id = ws_by_teammate.get(teammate_id, "")
             for mem_type, mem_items in type_groups.items():
-                created += await self._consolidate_type(teammate_id, mem_type, mem_items)
+                created += await self._consolidate_type(teammate_id, mem_type, mem_items, ws_id)
 
         if created:
             logger.info("[Consolidation] created %d brain fragments across %d teammates",
@@ -111,7 +115,7 @@ class MemoryConsolidationService:
         return created
 
     async def _consolidate_type(
-        self, teammate_id: str, mem_type: str, items: list,
+        self, teammate_id: str, mem_type: str, items: list, workspace_id: str = "",
     ) -> int:
         """Consolidate memory items of one type for one teammate."""
         if len(items) < CONSOLIDATION_THRESHOLD:
@@ -168,6 +172,7 @@ class MemoryConsolidationService:
 
             fragment = BrainFragment(
                 teammate_id=teammate_id,
+                workspace_id=workspace_id,
                 fragment_type=ftype,
                 content=content,
                 confidence=0.5,  # lower confidence for auto-consolidated

@@ -37,8 +37,14 @@ class BrainTaskHook(TaskHook):
 
     async def on_task_completed(self, ctx: TaskHookContext) -> None:
         """Fire-and-forget reflection + consolidation on task completion."""
+        ws_id = ctx.workspace_id
         if ctx.execution_teammate_id:
             asyncio.ensure_future(self._reflection.on_task_completed(ctx))
+        # 频道摘要：每个频道维护一条最新摘要片段（最小版本，不用向量库）
+        if ctx.channel_id:
+            asyncio.ensure_future(self._reflection.on_channel_summary(
+                ctx.channel_id, ctx.task_title, ctx.task_status, ws_id,
+            ))
         asyncio.ensure_future(self._consolidation.consolidate(lookback_hours=24))
 
     async def on_task_failed(self, ctx: TaskHookContext) -> None:
@@ -54,5 +60,5 @@ class BrainTaskHook(TaskHook):
         round_no = ctx.extra.get("round_no", 1)
         if teammate_id and task_id:
             asyncio.ensure_future(self._reflection.on_review_rejected(
-                task_id, teammate_id, comments, round_no,
+                task_id, teammate_id, comments, round_no, ctx.workspace_id,
             ))

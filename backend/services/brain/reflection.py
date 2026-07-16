@@ -74,15 +74,16 @@ class ReflectionService:
         )
         frag = BrainFragment(
             teammate_id=teammate_id,
+            workspace_id=ctx.workspace_id,
             fragment_type=BrainFragmentType.LESSONS,
             content=content.strip(),
             confidence=0.6,
             source="reflection",
         )
         await self._store.store(frag)
-        logger.info("[Reflection] lesson stored for task %s → teammate %s", ctx.task_id[:8], teammate_id[:8])
+        logger.info("[Reflection] lesson stored for task %s → teammate %s (ws %s)", ctx.task_id[:8], teammate_id[:8], ctx.workspace_id[:8] if ctx.workspace_id else "-")
 
-    async def on_review_rejected(self, task_id: str, teammate_id: str, comments: str, round_no: int) -> None:
+    async def on_review_rejected(self, task_id: str, teammate_id: str, comments: str, round_no: int, workspace_id: str = "") -> None:
         """Review rejected → generate behavior suggestion."""
         if not teammate_id or not comments:
             return
@@ -94,6 +95,7 @@ class ReflectionService:
         )
         frag = BrainFragment(
             teammate_id=teammate_id,
+            workspace_id=workspace_id,
             fragment_type=BrainFragmentType.BEHAVIOR_SUGGESTION,
             content=content.strip(),
             confidence=0.5,
@@ -117,13 +119,44 @@ class ReflectionService:
         )
         frag = BrainFragment(
             teammate_id=teammate_id,
+            workspace_id=ctx.workspace_id,
             fragment_type=BrainFragmentType.LESSONS,
             content=content.strip(),
             confidence=0.7,
             source="reflection",
         )
         await self._store.store(frag)
-        logger.info("[Reflection] failure lesson stored for task %s → teammate %s", ctx.task_id[:8], teammate_id[:8])
+        logger.info("[Reflection] failure lesson stored for task %s → teammate %s (ws %s)", ctx.task_id[:8], teammate_id[:8], ctx.workspace_id[:8] if ctx.workspace_id else "-")
+
+    async def on_channel_summary(
+        self, channel_id: str, task_title: str, task_status: str, workspace_id: str = "",
+    ) -> None:
+        """Append a task outcome to the channel's running summary fragment.
+
+        Min version: no vector store, just keep a rolling text summary per
+        (channel, workspace). Each completed/failed task appends one line.
+        """
+        if not channel_id:
+            return
+        store = self._store
+        # teammate_id slot reused as channel_id for channel-scoped fragments
+        frag_type = BrainFragmentType.CHANNEL_SUMMARY
+        latest = await store.get_latest(channel_id, frag_type.value, workspace_id)
+        existing_lines = (latest.content or "").strip().splitlines() if latest else []
+        # keep last 20 lines
+        existing_lines = existing_lines[-20:]
+        new_line = f"- [{task_status}] {task_title or 'untitled'} @ {datetime.now(timezone.utc).strftime('%m-%d %H:%M')}"
+        existing_lines.append(new_line)
+        frag = BrainFragment(
+            teammate_id=channel_id,  # slot reuse: channel-scoped
+            workspace_id=workspace_id,
+            fragment_type=frag_type,
+            content="\n".join(existing_lines),
+            confidence=0.9,
+            source="channel_summary",
+        )
+        await store.store(frag)
+        logger.info("[Reflection] channel summary updated for %s (ws %s)", channel_id[:8], workspace_id[:8] if workspace_id else "-")
 
 
 # Singleton

@@ -460,14 +460,21 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
     # workspace has an active key, use it. Prevents the "configured a key but
     # channel says none found" dead-end (P1 #1).
     async def _fallback_key_ref(ws: str | None = None) -> str | None:
-        kr = await db.execute(
-            select(APIKey).where(
-                APIKey.is_active == "1",
-                APIKey.workspace_id == (ws or None),
-            ).limit(1)
-        )
-        k = kr.scalar_one_or_none()
-        return k.id if k else None
+        # ponytail: strict ws match first, then any active key. ws ids are
+        # inconsistent across channels/teammates/keys, so a configured key
+        # must still reach the channel instead of dead-ending (P1 #1).
+        for cond in (
+            (APIKey.workspace_id == (ws or None)),
+            (APIKey.workspace_id.isnot(None)),
+            (APIKey.workspace_id.is_(None)),
+        ):
+            kr = await db.execute(
+                select(APIKey).where(APIKey.is_active == "1", cond).limit(1)
+            )
+            k = kr.scalar_one_or_none()
+            if k:
+                return k.id
+        return None
 
     all_teammates = []
     if teammate_ids:

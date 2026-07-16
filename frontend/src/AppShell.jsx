@@ -102,7 +102,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'brain') {
     viewKey = 'brain-' + refreshKey;
     ViewComponent = BrainPage;
-    viewProps = {};
+    viewProps = { channelId, onBack: () => setView('inbox') };
   } else if (view === 'team') {
     viewKey = 'team-' + refreshKey;
     ViewComponent = TeamPage;

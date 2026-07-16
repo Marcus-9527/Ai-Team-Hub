@@ -82,6 +82,7 @@ async def generate_team_response(
             turn_idx=turn_idx,
             phase=phase,
             shared_attachment_context=shared_attachment_context,
+            channel_id=channel_id,
         ):
             yield event
             # Extract content payload from SSE for history

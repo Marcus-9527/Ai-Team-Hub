@@ -90,16 +90,20 @@ async def test_resolve_workspace_key_isolates_scopes():
 
 async def test_apply_db_key_to_kwargs_no_workspace_returns_one_key():
     """
-    Without workspace_id, _apply_db_key_to_kwargs returns some active key
-    (MAEOS singleton init path — unchanged behavior).
+    DEFENSIVE TEST (production still calls _apply_db_key_to_kwargs with
+    workspace_id=None at maeos.py:65 and :123). It verifies that when no
+    legacy global key (workspace_id IS NULL) exists, the resolver FAILS SAFE
+    — raises ValueError and injects NO key — instead of silently borrowing a
+    scoped workspace's key. This is NOT a test of an actively-used fallback
+    that returns a key; it guards against a dangerous fallback if a caller
+    ever omits workspace_id in a context where no legacy key is configured.
     """
     from backend.routes.maeos import _apply_db_key_to_kwargs
     kwargs = {}
-    await _apply_db_key_to_kwargs(kwargs)
-    assert kwargs.get("api_key"), "No key resolved without workspace_id"
-    # This should return the real key (the only active one after E2E key cleanup)
-    print(f"  ✓ Global key resolved: {kwargs['api_key'][:12]}...")
-    assert len(kwargs["api_key"]) > 50, "Global fallback key is too short (test key?!)"
+    with pytest.raises(ValueError, match="No active API key found for scope 'legacy-global'"):
+        await _apply_db_key_to_kwargs(kwargs)
+    assert not kwargs.get("api_key"), "Resolver injected a key despite no legacy key — unsafe fallback!"
+    print("  ✓ No legacy key → fails safe, no key injected")
 
 
 async def test_workspace_without_key_raises_error():
@@ -108,6 +112,6 @@ async def test_workspace_without_key_raises_error():
     not silently borrow another workspace's key.
     """
     from backend.routes.maeos import _resolve_workspace_key
-    with pytest.raises(ValueError, match="no active API key configured"):
+    with pytest.raises(ValueError, match="No active API key found for scope 'nonexistent-workspace-id-xxx'"):
         await _resolve_workspace_key("nonexistent-workspace-id-xxx")
     print("  ✓ No-key workspace raises ValueError, not silent fallback")

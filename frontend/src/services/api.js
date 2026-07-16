@@ -127,6 +127,8 @@ export const getBrainLoaderPrompt = (teammateId, extraContext = '') =>
   request(`/api/brain/loader/${teammateId}?extra_context=${encodeURIComponent(extraContext)}`);
 export const listBrainFragmentTypes = () => request('/api/brain/fragment-types');
 export const getBrainOverview = () => request('/api/brain');
+export const getChannelSummary = (channelId) => request(`/api/brain/channel-summary/${channelId}`);
+export const listChatMemories = () => request('/api/brain/chat-memories');
 export const triggerBrainConsolidation = (lookbackHours = 48) =>
   request(`/api/brain/consolidate?lookback_hours=${lookbackHours}`, { method: 'POST' });
 

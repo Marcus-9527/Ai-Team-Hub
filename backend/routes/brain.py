@@ -9,8 +9,8 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query, Depends
-from backend.middleware.auth import require_admin
+from fastapi import APIRouter, Query, Depends, Request
+from backend.middleware.auth import require_admin, ws_id_of
 
 from backend.services.memory.memory_service import get_memory_service
 from backend.services.memory.memory_intelligence import get_intelligence_service
@@ -96,19 +96,45 @@ async def brain_reflect(task_id: str = ""):
 # ═══════════════════════════════════════════════════════════════
 
 
-@router.get("/fragments/{teammate_id}")
-async def list_fragments(teammate_id: str):
-    """Get all current brain fragments for a teammate."""
+@router.get("/chat-memories")
+async def list_chat_memories(request: Request, limit: int = 200):
+    """某 workspace 下所有队友的聊天记忆列表（按时间倒序）。"""
     store = get_brain_fragment_store()
-    fragments = await store.get_all_by_teammate(teammate_id)
+    ws = ws_id_of(request)
+    if not ws:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=400, content={"error": "workspace required"})
+    mems = await store.list_chat_memory_by_workspace(ws, limit=limit)
+    return {"items": [m.to_dict() for m in mems], "count": len(mems)}
+
+
+@router.get("/channel-summary/{channel_id}")
+async def get_channel_summary(channel_id: str, request: Request):
+    """Get the rolling channel summary fragment for a channel (workspace-scoped)."""
+    store = get_brain_fragment_store()
+    ws = ws_id_of(request)
+    frag = await store.get_latest(channel_id, BrainFragmentType.CHANNEL_SUMMARY.value, workspace_id=ws)
+    if frag is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": "no channel summary yet"})
+    return frag.to_dict()
+
+
+@router.get("/fragments/{teammate_id}")
+async def list_fragments(teammate_id: str, request: Request):
+    """Get all current brain fragments for a teammate (workspace-scoped)."""
+    store = get_brain_fragment_store()
+    ws = ws_id_of(request)
+    fragments = await store.get_all_by_teammate(teammate_id, workspace_id=ws)
     return {"fragments": [f.to_dict() for f in fragments], "count": len(fragments)}
 
 
 @router.get("/fragments/{teammate_id}/{fragment_type}")
-async def get_fragment(teammate_id: str, fragment_type: str):
+async def get_fragment(teammate_id: str, fragment_type: str, request: Request):
     """Get the latest version of a specific fragment type for a teammate."""
     store = get_brain_fragment_store()
-    frag = await store.get_latest(teammate_id, fragment_type)
+    ws = ws_id_of(request)
+    frag = await store.get_latest(teammate_id, fragment_type, workspace_id=ws)
     if frag is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": "fragment not found"})
@@ -116,18 +142,20 @@ async def get_fragment(teammate_id: str, fragment_type: str):
 
 
 @router.get("/fragments/{teammate_id}/{fragment_type}/versions")
-async def list_fragment_versions(teammate_id: str, fragment_type: str):
+async def list_fragment_versions(teammate_id: str, fragment_type: str, request: Request):
     """List all versions of a fragment type for a teammate."""
     store = get_brain_fragment_store()
-    versions = await store.list_versions(teammate_id, fragment_type)
+    ws = ws_id_of(request)
+    versions = await store.list_versions(teammate_id, fragment_type, workspace_id=ws)
     return {"versions": [v.to_dict() for v in versions], "count": len(versions)}
 
 
 @router.post("/fragments/{teammate_id}/{fragment_type}/rollback", dependencies=[Depends(require_admin)])
-async def rollback_fragment(teammate_id: str, fragment_type: str, target_version: int = Query(...)):
+async def rollback_fragment(teammate_id: str, fragment_type: str, request: Request, target_version: int = Query(...)):
     """Rollback a fragment to a previous version."""
     store = get_brain_fragment_store()
-    new_id = await store.rollback(teammate_id, fragment_type, target_version)
+    ws = ws_id_of(request)
+    new_id = await store.rollback(teammate_id, fragment_type, target_version, workspace_id=ws)
     if new_id is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=404, content={"error": f"version {target_version} not found"})

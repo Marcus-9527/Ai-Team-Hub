@@ -13,6 +13,7 @@ import {
 } from '../../services/api';
 import { parseSSEBuffer } from '../../services/eventBus';
 import { useTranslation } from '../../i18n';
+import ManageTeammatesModal from './ManageTeammatesModal';
 import { dispatchTaskEvent, isTaskEventType } from '../../services/taskEventBus';
 
 export default function ChannelView({ channelId, triggerRefresh, refreshKey, onOpenSettings }) {
@@ -25,6 +26,7 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
   const [pendingFiles, setPendingFiles] = useState([]);
   const [uploadStatus, setUploadStatus] = useState({});
   const [showActions, setShowActions] = useState(false);
+  const [showManageTeammates, setShowManageTeammates] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -148,6 +150,13 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
 
     // error events may also carry no message_id
     if (type === 'error') {
+      if (message_id) {
+        setMessages(prev => prev.map(m =>
+          m.message_id === message_id && m.role === 'team'
+            ? { ...m, status: 'error' }
+            : m
+        ));
+      }
       setMessages(prev => [...prev, {
         id: 'err-' + message_id + '-' + Date.now(),
         role: 'system',
@@ -216,15 +225,20 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
           message_id: message_id,
           avatar_emoji: displayAvatar,
           content: content || '',
+          status: 'processing',
           phase: phase || '',
           created_at: new Date().toISOString(),
         }];
       });
     }
 
-    // teammate_end — no-op, bubble already rendered by teammate_message
+    // teammate_end — mark as replied
     if (type === 'teammate_end') {
-      // No UI action needed (bubble is already complete)
+      setMessages(prev => prev.map(m =>
+        m.message_id === message_id && m.role === 'team'
+          ? { ...m, status: 'replied' }
+          : m
+      ));
     }
 
     if (type === 'error') {
@@ -502,6 +516,13 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
                       <Eraser size={15} className="text-amber-500" />
                       <span className="text-xs font-semibold">{t('channel.clear')}</span>
                     </button>
+                    <button
+                      onClick={() => { setShowActions(false); setShowManageTeammates(true); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-ink hover:bg-surface-hover transition-colors"
+                    >
+                      <Users size={15} className="text-primary" />
+                      <span className="text-xs font-semibold">管理队友</span>
+                    </button>
                     <div className="border-t border-hairline my-1" />
                     <button
                       onClick={async () => {
@@ -708,6 +729,14 @@ export default function ChannelView({ channelId, triggerRefresh, refreshKey, onO
         </div>
       )}
       </div>
+      {showManageTeammates && (
+        <ManageTeammatesModal
+          channelId={channelId}
+          channel={channel}
+          onClose={() => setShowManageTeammates(false)}
+          onSaved={() => loadChannel()}
+        />
+      )}
     </div>
   );
 }
@@ -789,6 +818,11 @@ function MessageBubble({ message, teammatesById }) {
               <p key={i} className={i > 0 ? 'mt-1' : ''}>{line}</p>
             ))}
           </div>
+          {isUser && message.status && message.status !== 'replied' && (
+            <span className="text-[9px] text-white/50 mt-1 block text-right">
+              {message.status === 'processing' ? '⋯' : message.status === 'error' ? '✗' : ''}
+            </span>
+          )}
         </div>
         {hasAttachments && (
           <div className="mt-2 flex flex-col gap-1.5">
@@ -915,6 +949,9 @@ function TeamMessageBubble({ message, teammatesById }) {
                 <p key={i} className={i > 0 ? 'mt-1' : ''}>{line}</p>
               ))}
             </div>
+            <span className="text-[9px] text-ink-faint/40 mt-1 block text-right">
+              {message.status === 'replied' ? '✓' : message.status === 'error' ? '✗' : ''}
+            </span>
           </div>
         </div>
       </div>

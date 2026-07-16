@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import * as api from '../../services/api';
 import AutomationJobsPage from './AutomationJobsPage';
+import RunStatusView from './RunStatusView';
 
 const STATE_DOT = {
   thinking: '#818cf8',
@@ -97,6 +98,11 @@ export default function AIOpsCenter() {
                 style={tab === 'jobs' ? { background: 'var(--color-primary)' } : { background: 'rgba(0,0,0,0.05)', color: 'var(--color-ink-faint)' }}>
                 定时任务
               </button>
+              <button onClick={() => setTab('runs')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${tab === 'runs' ? 'text-white' : 'opacity-60 hover:opacity-100'}`}
+                style={tab === 'runs' ? { background: 'var(--color-primary)' } : { background: 'rgba(0,0,0,0.05)', color: 'var(--color-ink-faint)' }}>
+                运行状态
+              </button>
             </div>
           </div>
           <button
@@ -110,6 +116,8 @@ export default function AIOpsCenter() {
 
         {tab === 'jobs' ? (
           <AutomationJobsPage />
+        ) : tab === 'runs' ? (
+          <RunStatusView />
         ) : (
         <>
         {loading && (

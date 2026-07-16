@@ -108,6 +108,10 @@ function Root() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem('aihub_lang', lang);
+  }, [lang]);
+
   const handleAuth = useCallback(() => {
     navigate('/app');
   }, [navigate]);

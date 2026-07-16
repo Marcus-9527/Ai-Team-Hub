@@ -282,12 +282,29 @@ class TaskExecutor:
             step_id=step.id, step_order=step.order, attempt=attempt,
             teammate_id=step.teammate_id or "",
         )
+        # Resolve teammate's own API key (workspace-isolated via api_key_ref).
+        # ponytail: pass resolved key to runtime.submit so MAEOS singleton's
+        # stale default_api_key is never used for task steps (no cross-ws borrow).
+        api_key = None
+        if step.teammate_id:
+            try:
+                tm = await _load_teammate(step.teammate_id)
+                if tm:
+                    # resolve_api_key returns a 4-tuple
+                    # (api_key, base_url, provider, fallback_model).
+                    api_key, *_ = await resolve_api_key(tm)
+            except Exception as _e:
+                logger.error(
+                    "[EXECUTOR] key resolve failed for %s: %s",
+                    step.teammate_id[:8], _e,
+                )
         runtime_task_id = await self._runtime.submit(
             description=context,
             priority=task.priority,
             intent=f"task_step:{task.id}",
             teammate=step.teammate_id or "",
             workspace_id=task.workspace_id or "",
+            api_key=api_key,
             wait=False,
         )
         trace.log_teammate_dispatch(

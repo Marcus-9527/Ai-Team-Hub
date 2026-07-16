@@ -17,7 +17,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar({
   activeView, onNavigate, showSettings, onOpenSettings,
-  channelId, onChannelSelect,
+  channelId, onChannelSelect, onNavigateToLanding,
 }) {
   const t = useTranslation();
   const [channels, setChannels] = useState([]);
@@ -238,7 +238,12 @@ export default function Sidebar({
       {showCreate && (
         <CreateChannelModal
           onClose={() => setShowCreate(false)}
-          onCreate={(id) => { setShowCreate(false); onChannelSelect(id); onNavigate('chat'); }}
+          onCreate={async (id) => {
+            setShowCreate(false);
+            onChannelSelect(id);
+            onNavigate('chat');
+            try { const chs = await api.listChannels(); setChannels(chs); } catch {}
+          }}
         />
       )}
       {showCreateTeammate && (

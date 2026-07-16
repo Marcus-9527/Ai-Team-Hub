@@ -285,10 +285,13 @@ class CedeProtocol:
             area_keywords = engineering_kw + ["review", "quality", "code review",
                                               "审核", "审查"]
         else:
-            # Default: broad match for unknown roles
-            area_keywords = engineering_kw + design_kw + product_kw + analyst_kw
+            # Unknown role → always respond (cannot filter by keyword)
+            # Every teammate gets a chance to speak; avoids silent teammate bug
+            # where unknown-role teammates never reach the 0.3 confidence threshold
+            # because the combined keyword pool dilutes match ratio.
+            return True, 1.0
 
-        # Count keyword matches
+        # Count keyword matches within the chosen area
         matches = sum(1 for kw in area_keywords if kw in message_lower)
         total = len(area_keywords)
         if total == 0:
@@ -299,7 +302,7 @@ class CedeProtocol:
 
         is_relevant = matches >= 2 or confidence >= 0.3
 
-        # No keyword match → generic message, let the teammate decide by LLM
+        # No keyword match → generic message, give the benefit of the doubt
         if matches == 0:
             return True, 0.3  # ponytail: default respond to avoid silent ceiling
 

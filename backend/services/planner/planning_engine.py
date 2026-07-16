@@ -42,7 +42,9 @@ class PlanningEngine:
 
     async def plan(self, goal: str,
                    context: dict | None = None,
-                   task_id: str = "") -> DAGDefinition:
+                   task_id: str = "",
+                   api_key: str = "",
+                   provider: str = "openrouter") -> DAGDefinition:
         """Convert a natural language goal into a validated DAGDefinition.
 
         Args:
@@ -62,7 +64,7 @@ class PlanningEngine:
                      analysis.task_type, analysis.complexity)
 
         # 2. Call LLM → get TaskPlan
-        plan = await self._call_llm(goal, context or {}, task_id)
+        plan = await self._call_llm(goal, context or {}, task_id, api_key, provider)
 
         # 3. Build DAG
         dag = self._builder.build(plan)
@@ -80,7 +82,7 @@ class PlanningEngine:
         return dag
 
     async def _call_llm(self, goal: str, context: dict,
-                        task_id: str) -> TaskPlan:
+                        task_id: str, api_key: str = "", provider: str = "openrouter") -> TaskPlan:
         """Call the LLM to produce a TaskPlan.
 
         Default implementation uses the existing generate_plan (MAEOS).
@@ -100,6 +102,7 @@ class PlanningEngine:
             plan = await generate_plan(
                 maeos=maeos, goal=goal,
                 task_id=task_id, context=context or {},
+                api_key=api_key, provider=provider,
             )
         except DriverPlanningError as e:
             # driver defines its own PlanningError; re-raise as this module's

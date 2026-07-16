@@ -209,6 +209,10 @@ export const deleteAutomationJob = (id) =>
   request(`/api/automation-jobs/${id}`, { method: 'DELETE' });
 export const triggerAutomationJob = (id) =>
   request(`/api/automation-jobs/${id}/trigger`, { method: 'POST' });
+export const listAutomationRuns = (jobId) =>
+  request(`/api/automation-jobs/${jobId}/runs`);
+export const listAllAutomationRuns = () =>
+  request('/api/automation-jobs/runs');
 // ── Board Tasks (Phase 28: claim board) ──
 export const listBoardTasks = (channelId) =>
   request(`/api/channels/${channelId}/tasks`);

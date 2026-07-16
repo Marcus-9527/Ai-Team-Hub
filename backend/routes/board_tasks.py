@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,7 +84,7 @@ async def _assert_channel_in_ws(db: AsyncSession, channel_id: str, ws: str) -> N
 @router.post("/board-tasks", status_code=201)
 async def create_board_task(
     req: CreateBoardTaskRequest,
-    request: "object" = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
     ws = _board_ws(request)
@@ -107,7 +107,7 @@ async def create_board_task(
 
 
 @router.get("/channels/{channel_id}/tasks")
-async def list_channel_tasks(channel_id: str, request: "object" = None, db: AsyncSession = Depends(get_db)):
+async def list_channel_tasks(channel_id: str, request: Request = None, db: AsyncSession = Depends(get_db)):
     ws = _board_ws(request)
     # channel existence + ws ownership checked implicitly: filter by ws AND channel
     rows = (
@@ -124,7 +124,7 @@ async def list_channel_tasks(channel_id: str, request: "object" = None, db: Asyn
 async def update_board_task(
     task_id: str,
     req: UpdateBoardTaskRequest,
-    request: "object" = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
     ws = _board_ws(request)
@@ -152,7 +152,7 @@ async def update_board_task(
 async def claim_board_task(
     task_id: str,
     req: ClaimBoardTaskRequest,
-    request: "object" = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
     ws = _board_ws(request)

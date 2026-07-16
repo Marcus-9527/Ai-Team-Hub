@@ -283,6 +283,12 @@ async def resolve_api_key(teammate: dict) -> tuple[Optional[str], Optional[str],
             tm_api_key_ref, fb_base, fb_provider = fb
             fallback = True
             fallback_model = DEFAULT_MODEL_BY_PROVIDER.get(fb_provider)
+            # ponytail: explicit audit trail — teammate has no own key, using
+            # the workspace-scoped key (never a foreign workspace's key).
+            logger.info(
+                "[KEY] teammate '%s' has no own key — using workspace %s's active key",
+                teammate.get("name", "?"), ws_id or "legacy-global",
+            )
 
     if not tm_api_key_ref:
         return None, None, None, None

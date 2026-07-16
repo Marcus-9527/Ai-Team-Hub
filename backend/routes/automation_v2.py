@@ -34,6 +34,29 @@ class CreateJobRequest(BaseModel):
     status: str = "active"
 
 
+# ── Schedule helpers ──
+
+_PRESET_INTERVALS = {
+    "daily": 86400,
+    "weekly": 604800,
+    "hourly": 3600,
+    "every_6h": 21600,
+    "every_12h": 43200,
+}
+
+
+def _parse_schedule_interval(expr: str | None) -> int | None:
+    """Convert schedule_expression to interval seconds (preset name or raw int)."""
+    if not expr:
+        return None
+    if expr in _PRESET_INTERVALS:
+        return _PRESET_INTERVALS[expr]
+    try:
+        return int(expr)
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Job CRUD ──
 
 @router.get("")
@@ -95,6 +118,16 @@ async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
 
 # ── Run history ──
 
+@router.get("/runs")
+async def list_all_runs(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationRunModel)
+        .order_by(AutomationRunModel.created_at.desc())
+        .limit(50)
+    )
+    return {"runs": [_r2d(r) for r in result.scalars().all()]}
+
+
 @router.get("/{job_id}/runs")
 async def list_runs(job_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -141,6 +174,12 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
     """Execute one automation job: load teammate → create task via orchestrator."""
     try:
         async with async_session() as db:
+            # Reload run in this session
+            db_run = await db.get(AutomationRunModel, run.id)
+            if not db_run:
+                logger.warning("[AUTOv2] run %s disappeared", run.id[:8])
+                return
+
             # Load teammate identity
             tm = None
             if job.teammate_id:
@@ -155,36 +194,42 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
             description = job.goal[:500] if job.goal else job.name
 
             mgr = TaskManager()
+            ws_id = tm.workspace_id if tm else None
             task = await mgr.create_task(
                 db, title=title, description=description,
-                channel_id="", intent=job.goal or job.name,
+                channel_id="", workspace_id=ws_id,
+                intent=job.goal or job.name,
             )
             await db.commit()
 
             # Run through orchestrator
+            # ponytail: a fresh ExecutionRuntime has NO dispatch loop/workers
+            # until start() is called — without it, submit() enqueues the task
+            # but wait() blocks forever (silent hang, HTTP 200, no AI call).
             runtime = ExecutionRuntime(max_workers=4)
+            await runtime.start()
             orch = TaskOrchestrator(runtime=runtime)
             await orch.start_task(db, task.id, job.goal or job.name)
 
             # Update run record
-            run.status = "completed" if getattr(task, "status", "") == "COMPLETED" else "failed"
-            run.result = f"Task {task.id[:8]} finished: {getattr(task, 'status', 'unknown')}"
-            run.created_tasks = [task.id]
-            run.completed_at = datetime.now(timezone.utc)
+            db_run.status = "completed" if getattr(task, "status", "") == "COMPLETED" else "failed"
+            db_run.result = f"Task {task.id[:8]} finished: {getattr(task, 'status', 'unknown')}"
+            db_run.created_tasks = [task.id]
+            db_run.completed_at = datetime.now(timezone.utc)
 
             job.last_run = datetime.now(timezone.utc)
             await db.commit()
 
-            logger.info("[AUTOv2] job '%s' → task %s → %s", job.name[:30], task.id[:8], run.status)
+            logger.info("[AUTOv2] job '%s' → task %s → %s", job.name[:30], task.id[:8], db_run.status)
     except Exception as e:
         logger.error("[AUTOv2] job '%s' failed: %s", job.name[:30], e)
         try:
             async with async_session() as db:
-                run = await db.get(AutomationRunModel, run.id)
-                if run:
-                    run.status = "failed"
-                    run.error = str(e)[:2000]
-                    run.completed_at = datetime.now(timezone.utc)
+                db_run = await db.get(AutomationRunModel, run.id)
+                if db_run:
+                    db_run.status = "failed"
+                    db_run.error = str(e)[:2000]
+                    db_run.completed_at = datetime.now(timezone.utc)
                     await db.commit()
         except Exception:
             pass
@@ -202,16 +247,19 @@ async def _check_due_jobs():
             )
             now = datetime.now(timezone.utc)
             for job in result.scalars().all():
-                # ponytail: no real cron parser — just run jobs that have never run
-                # or whose next_run is in the past. Accept minimal for now.
-                if job.last_run is None:
-                    run = AutomationRunModel(
-                        id=gen_uuid(), job_id=job.id, trigger="cron",
-                        status="running", started_at=now,
-                    )
-                    db.add(run)
-                    await db.commit()
-                    asyncio.create_task(_execute_job(job, run))
+                interval = _parse_schedule_interval(job.schedule_expression)
+                if interval is None:
+                    continue  # can't interpret schedule
+                if job.last_run and (now - job.last_run.replace(tzinfo=timezone.utc)).total_seconds() < interval:
+                    continue  # not due yet
+                # Create run and execute
+                run = AutomationRunModel(
+                    id=gen_uuid(), job_id=job.id, trigger="cron",
+                    status="running", started_at=now,
+                )
+                db.add(run)
+                await db.commit()
+                asyncio.create_task(_execute_job(job, run))
     except Exception as e:
         logger.debug("[AUTOv2] check cycle: %s", e)
 

@@ -99,6 +99,8 @@ async def generate_plan(
     task_id: str = "",
     context: dict | None = None,
     priority: int = TaskPriority.HIGH,
+    api_key: str = "",
+    provider: str = "openrouter",
 ) -> TaskPlan:
     """
     Generate a TaskPlan for a user goal via Planner Teammate.
@@ -118,6 +120,9 @@ async def generate_plan(
             including task history, channel messages, workspace memory,
             and file references.
         priority: MAEOS task priority.
+        api_key: Pre-resolved API key for this workspace (caller's
+            responsibility to resolve using the parent DB session).
+        provider: LLM provider name.
 
     Returns:
         A validated TaskPlan.
@@ -126,6 +131,9 @@ async def generate_plan(
         PlanningError: After exhausting retries.
     """
     planner_prompt = _build_planner_prompt(goal, context)
+
+    logger.info("[PLAN] using key_len=%d provider=%s",
+                 len(api_key) if api_key else 0, provider)
 
     last_error: Exception | None = None
 
@@ -139,6 +147,8 @@ async def generate_plan(
                 priority=priority,
                 intent=f"planner:{task_id}" if task_id else "planner",
                 wait=True,
+                api_key=api_key or None,
+                provider=provider,
             )
 
             # Step 2: Wait for completion

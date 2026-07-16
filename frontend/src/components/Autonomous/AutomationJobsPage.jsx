@@ -4,13 +4,21 @@ import { motion } from 'framer-motion';
 import { Zap, Plus, Play, Trash2, RefreshCw, Clock, Bot, Loader2 } from 'lucide-react';
 import * as api from '../../services/api';
 
+const CRON_PRESETS = [
+  { value: 'daily', label: '每天' },
+  { value: 'weekly', label: '每周' },
+  { value: 'every_6h', label: '每6小时' },
+  { value: 'hourly', label: '每小时' },
+  { value: 'custom', label: '自定义' },
+];
+
 export default function AutomationJobsPage() {
   const [jobs, setJobs] = useState([]);
   const [teammates, setTeammates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState({});
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', teammate_id: '', goal: '', trigger_type: 'manual' });
+  const [form, setForm] = useState({ name: '', teammate_id: '', goal: '', trigger_type: 'manual', schedule_expression: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -25,11 +33,19 @@ export default function AutomationJobsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const resetForm = () => setForm({ name: '', teammate_id: '', goal: '', trigger_type: 'manual', schedule_expression: '' });
+
   const handleCreate = async () => {
     if (!form.name) return;
-    await api.createAutomationJob(form);
+    await api.createAutomationJob({
+      name: form.name,
+      teammate_id: form.teammate_id,
+      goal: form.goal,
+      trigger_type: form.schedule_expression ? 'cron' : form.trigger_type,
+      schedule_expression: form.schedule_expression,
+    });
     setShowCreate(false);
-    setForm({ name: '', teammate_id: '', goal: '', trigger_type: 'manual' });
+    resetForm();
     load();
   };
 
@@ -76,17 +92,42 @@ export default function AutomationJobsPage() {
             <option value="">不指定队友（自动分配）</option>
             {teammates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
           </select>
-          <select value={form.trigger_type} onChange={e => setForm(p => ({ ...p, trigger_type: e.target.value }))}
+          <select value={form.trigger_type} onChange={e => setForm(p => ({ ...p, trigger_type: e.target.value, schedule_expression: e.target.value !== 'cron' ? '' : p.schedule_expression }))}
             className="w-full px-3 py-2 rounded-lg border border-[#e2ddd7] text-sm focus:outline-none focus:border-[#1d1d1d] bg-white">
             <option value="manual">手动触发</option>
             <option value="cron">定时（cron）</option>
             <option value="event">事件触发</option>
             <option value="webhook">Webhook</option>
           </select>
+
+          {/* Cron presets */}
+          {form.trigger_type === 'cron' && (
+            <div>
+              <p className="text-xs text-[#9ca3af] mb-1.5">执行频率</p>
+              <div className="flex flex-wrap gap-2">
+                {CRON_PRESETS.map(p => (
+                  <button key={p.value} onClick={() => setForm(f => ({ ...f, schedule_expression: p.value }))}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      form.schedule_expression === p.value
+                        ? 'bg-[#1d1d1d] text-white border-[#1d1d1d]'
+                        : 'bg-white text-[#5c5c5c] border-[#e2ddd7] hover:border-[#1d1d1d]'
+                    }`}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              {form.schedule_expression === 'custom' && (
+                <input placeholder="Cron 表达式 (如 0 9 * * *)" value={form.cron_raw || ''}
+                  onChange={e => setForm(f => ({ ...f, schedule_expression: e.target.value, cron_raw: e.target.value }))}
+                  className="w-full mt-2 px-3 py-2 rounded-lg border border-[#e2ddd7] text-sm focus:outline-none focus:border-[#1d1d1d]" />
+              )}
+            </div>
+          )}
+
           <textarea placeholder="工作目标（goal）" value={form.goal} onChange={e => setForm(p => ({ ...p, goal: e.target.value }))}
             className="w-full px-3 py-2 rounded-lg border border-[#e2ddd7] text-sm focus:outline-none focus:border-[#1d1d1d] min-h-[60px]" />
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-[#5c5c5c] hover:text-[#1d1d1d]">取消</button>
+            <button onClick={() => { setShowCreate(false); resetForm(); }} className="px-4 py-2 text-sm text-[#5c5c5c] hover:text-[#1d1d1d]">取消</button>
             <button onClick={handleCreate} className="px-4 py-2 rounded-lg bg-[#1d1d1d] text-white text-sm font-medium hover:bg-[#333] transition-all">创建</button>
           </div>
         </motion.div>
@@ -116,6 +157,11 @@ export default function AutomationJobsPage() {
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#e2ddd7] text-[#5c5c5c] font-medium">
                       {TRIGGER_LABEL[job.trigger_type] || job.trigger_type}
                     </span>
+                    {job.schedule_expression && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1d1d1d]/5 text-[#5c5c5c]">
+                        {job.schedule_expression}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-[#9ca3af] mt-1 truncate">{job.goal || '—'}</p>
                   <div className="flex items-center gap-3 mt-1.5 text-[11px] text-[#9ca3af]">

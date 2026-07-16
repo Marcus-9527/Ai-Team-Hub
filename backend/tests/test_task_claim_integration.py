@@ -150,7 +150,7 @@ async def test_claim_winner_executes_once(db_session):
                new=lambda *a, **k: _fake_stream()), \
          patch("backend.services.runtime.executor._load_teammate",
                new=AsyncMock(return_value=tm_dict)), \
-         patch("backend.services.runtime.teammate_runner.resolve_api_key",
+         patch("backend.services.runtime.executor.resolve_api_key",
                new=AsyncMock(return_value=("fake-key", "", "openrouter", None))), \
          patch("backend.services.brain.brain_loader.get_brain_loader") as gbl:
         gbl.return_value.build_prompt = AsyncMock(return_value="")

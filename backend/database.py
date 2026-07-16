@@ -63,10 +63,21 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         if _is_sqlite:
             await conn.execute(text("PRAGMA journal_mode=WAL;"))
-            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL;"));
 
     if _is_sqlite:
         await _migrate_columns()
+
+    # Seed preset templates on startup (ponytail: sync seed, routes/teammates.py lazy seed is a fallback)
+    from backend.models import TeammateTemplate as TplModel
+    from sqlalchemy import func as sa_func
+    from backend.routes.teammates import PRESET_TEMPLATES
+    async with async_session() as db:
+        cnt = await db.execute(sa_func.count(TplModel.id))
+        if cnt.scalar() == 0:
+            for tpl in PRESET_TEMPLATES:
+                db.add(TplModel(**tpl))
+            await db.commit()
 
 
 async def _migrate_columns() -> None:

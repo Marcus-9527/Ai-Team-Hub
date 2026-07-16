@@ -78,8 +78,8 @@ export default function ProjectsSection() {
             <div className="tl-project-card__bottom">
               <div className="tl-container">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                  <div><div className="tl-body" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: '400px' }}>{project.desc}</div></div>
-                  <div className="tl-caption" style={{ color: 'rgba(255,255,255,0.3)' }}>String(0{index + 1})</div>
+                  <div className="tl-body" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: '400px' }}>{project.desc}</div>
+                  <div className="tl-caption" style={{ color: 'rgba(255,255,255,0.3)' }}>0{index + 1}</div>
                 </div>
               </div>
             </div>

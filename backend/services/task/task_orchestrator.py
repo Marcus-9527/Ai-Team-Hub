@@ -81,7 +81,7 @@ class TaskOrchestrator:
 
             # 1. Generate plan (DAG)
             logger.info("[ORCH-DBG] step1: calling _plan with goal=%s", goal[:60])
-            dag = await self._plan(goal, task_id, db)
+            dag = await self._plan(goal, task_id, task.workspace_id, db)
             logger.info("[ORCH-DBG] step1 done: dag=%s nodes=%d", getattr(dag, 'id', 'None'), len(dag.nodes) if dag else 0)
             if not dag or not dag.nodes:
                 logger.info("[ORCH] No plan for %s; task stays at PLANNING", task_id[:8])
@@ -219,13 +219,48 @@ class TaskOrchestrator:
 
     # ── Private helpers ──────────────────────────────────────────────
 
-    async def _plan(self, goal: str, task_id: str, db: AsyncSession = None):
+    async def _plan(self, goal: str, task_id: str, workspace_id: str = "", db: AsyncSession = None):
         """Try PlanningEngine, fallback to keyword analysis + teammate profiles."""
         engine = PlanningEngine()
+
+        # Resolve workspace-scoped API key using the caller's db session
+        # (avoid opening a new session inside the planning engine → SQLite deadlock).
+        api_key = ""
+        provider = "openrouter"
+        if workspace_id and db is not None:
+            try:
+                from backend.models import APIKey
+                from backend.crypto import decrypt_value
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(APIKey)
+                    .where(APIKey.is_active == "1")
+                    .where(APIKey.workspace_id == workspace_id)
+                    .limit(1)
+                )
+                row = result.scalar_one_or_none()
+                if row:
+                    plain = decrypt_value(row.api_key)
+                    if plain:
+                        api_key = plain
+                        provider = row.provider or "openrouter"
+                        logger.info("[ORCH] resolved key for ws=%s: key_len=%d provider=%s",
+                                     workspace_id[:12], len(plain), provider)
+                if not api_key:
+                    raise RuntimeError(
+                        f"Workspace {workspace_id[:12]}... has no active API key configured."
+                    )
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(f"Failed to resolve API key: {e}") from e
+
         try:
             dag = await asyncio.wait_for(
                 engine.plan(
                     goal=goal, context={"task_id": task_id}, task_id=task_id,
+                    api_key=api_key,
+                    provider=provider,
                 ),
                 timeout=15.0,
             )

@@ -55,25 +55,45 @@ async def _get_maeos(**kwargs):
 
         from backend.services.maeos import MAEOS
         # ponytail: when no api_key was configured, try to load the first
-        # active workspace key from the DB so planning tasks don't fail.
+        # legacy (workspace-less) DB key so planning tasks don't fail.
+        # Isolation is preserved: _apply_db_key_to_kwargs only ever scopes to
+        # a legacy NULL workspace — it never borrows another workspace's key.
+        # If no legacy key exists, degrade to "no key" instead of failing:
+        # the caller (e.g. PlanningEngine) supplies its own workspace key.
         if not kwargs.get("api_key") and not os.environ.get("AI_TEAM_HUB_API_KEY"):
-            await _apply_db_key_to_kwargs(kwargs)
+            try:
+                await _apply_db_key_to_kwargs(kwargs)
+            except ValueError as e:
+                logger.warning("[MAEOS] no legacy global key available: %s", e)
         _maeos = MAEOS(**kwargs)
         await _maeos.start()
         return _maeos
 
 
-async def _apply_db_key_to_kwargs(kwargs: dict) -> None:
-    """Mutate kwargs in-place with the first active DB key."""
+async def _apply_db_key_to_kwargs(kwargs: dict, workspace_id: str = None) -> None:
+    """Mutate kwargs in-place with the active DB key for the given workspace.
+
+    Scoping rule (workspace isolation, no silent cross-borrow):
+      - workspace_id given  → only that workspace's key is eligible.
+      - workspace_id None   → ONLY legacy keys with empty workspace_id.
+                              Never borrows another workspace's key.
+    Raises ValueError if no eligible key exists, so a missing key fails loud
+    instead of letting MAEOS run with a borrowed/foreign key.
+    """
     try:
         from backend.database import async_session
         from backend.models import APIKey
         from sqlalchemy import select
         from backend.crypto import decrypt_value
         async with async_session() as sess:
-            row = (await sess.execute(
-                select(APIKey).where(APIKey.is_active == "1").limit(1)
-            )).scalar_one_or_none()
+            q = select(APIKey).where(APIKey.is_active == "1")
+            if workspace_id:
+                q = q.where(APIKey.workspace_id == workspace_id)
+            else:
+                # ponytail: legacy-only scope — an empty workspace_id means
+                # "global/admin key", NOT "any workspace's key".
+                q = q.where(APIKey.workspace_id.is_(None))
+            row = (await sess.execute(q.limit(1))).scalar_one_or_none()
             if row:
                 plain = decrypt_value(row.api_key)
                 if plain:
@@ -81,7 +101,17 @@ async def _apply_db_key_to_kwargs(kwargs: dict) -> None:
                     kwargs["api_key"] = plain
                     if row.base_url:
                         kwargs["base_url"] = row.base_url
-                    logger.info("[MAEOS] auto-loaded API key from DB: %s", row.id[:8])
+                    logger.info("[MAEOS] auto-loaded API key from DB: %s (ws=%s)", row.id[:8], workspace_id or "legacy-global")
+                    return
+            # No eligible key — fail loud, never borrow another workspace's key.
+            scope = workspace_id or "legacy-global"
+            raise ValueError(
+                f"No active API key found for scope '{scope}'. "
+                f"Add an API key to this workspace (or a legacy global key) "
+                f"before running automation jobs."
+            )
+    except ValueError:
+        raise
     except Exception as e:
         logger.warning("[MAEOS] failed to auto-load API key: %s", e)
 
@@ -97,6 +127,22 @@ async def _upgrade_maeos_key(maeos) -> None:
         if kwargs.get("base_url"):
             maeos._runtime.default_base_url = kwargs["base_url"]
         logger.info("[MAEOS] upgraded existing MAEOS with DB key")
+
+
+async def _resolve_workspace_key(workspace_id: str) -> dict:
+    """Resolve API key+provider+base_url for a specific workspace.
+
+    Returns dict with keys: api_key, provider, base_url.
+    Raises ValueError if workspace has no active key — no silent cross-workspace borrowing.
+    """
+    kwargs = {}
+    await _apply_db_key_to_kwargs(kwargs, workspace_id)
+    if not kwargs.get("api_key"):
+        raise ValueError(
+            f"Workspace {workspace_id[:12]}... has no active API key configured. "
+            "Please add an API key to this workspace before running automation jobs."
+        )
+    return kwargs
 
 
 def init_maeos(max_workers: int = 4, provider: str = "openrouter",

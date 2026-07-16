@@ -145,6 +145,7 @@ class Message(Base):
     teammate_id = Column(String, nullable=True)    # NEW: unified teammate_id (equals role)
     message_id = Column(String, nullable=True)     # NEW: per-teammate uuid (group key)
     avatar_emoji = Column(String, default="🤖")    # display avatar
+    status = Column(String, default="unread")       # unread | processing | replied | read | error
     content = Column(Text, default="")
     attachments = Column(JSON, nullable=True)       # list of file metadata
     created_at = Column(DateTime, default=utcnow)

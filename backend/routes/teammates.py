@@ -6,7 +6,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db, async_session
-from backend.models import Teammate, TaskExecutionModel
+from backend.models import Teammate, TaskExecutionModel, TeammateTemplate
 from backend.cache import teammate_cache
 from backend.services.cache_warmup_service import invalidate_warmup
 from backend.middleware.auth import require_admin, ws_id_of
@@ -92,6 +92,82 @@ async def create_teammate(data: dict, request: Request, db: AsyncSession = Depen
         await get_state_manager().set_active(teammate.id)
     except Exception as e:
         logger.debug("[TEAMMATE] state registration skipped: %s", e)
+
+    return {"id": teammate.id, "name": teammate.name}
+
+
+# ── Teammate Blueprint Templates (must precede /{teammate_id} routes) ──
+
+
+@router.get("/templates")
+async def list_templates(db: AsyncSession = Depends(get_db)):
+    """Return all blueprint templates, seeding DB on first call."""
+    # ponytail: seed lazily on first read — no startup hook needed
+    from sqlalchemy import func as sa_func
+    cnt = await db.execute(sa_func.count(TeammateTemplate.id))
+    if cnt.scalar() == 0:
+        for tpl in PRESET_TEMPLATES:
+            db.add(TeammateTemplate(**tpl))
+        await db.commit()
+
+    result = await db.execute(select(TeammateTemplate).order_by(TeammateTemplate.category, TeammateTemplate.name))
+    templates = result.scalars().all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "category": t.category,
+            "description": t.description,
+            "identity": t.identity,
+            "system_prompt": t.system_prompt,
+            "skills": t.skills or [],
+            "tools": t.tools or [],
+            "memory_schema": t.memory_schema or {},
+            "automation_defaults": t.automation_defaults or {},
+            "avatar_emoji": t.avatar_emoji,
+            "model_provider": t.model_provider,
+            "model_name": t.model_name,
+        }
+        for t in templates
+    ]
+
+
+@router.post("/from-template", dependencies=[Depends(require_admin)])
+async def create_from_template(data: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    """Create a teammate from a blueprint template."""
+    template_id = data.get("template_id")
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id is required")
+
+    result = await db.execute(select(TeammateTemplate).where(TeammateTemplate.id == template_id))
+    tpl = result.scalar_one_or_none()
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    name = data.get("name") or tpl.name
+    ws = ws_id_of(request)
+
+    teammate = Teammate(
+        name=name,
+        role=data.get("role") or tpl.identity or "assistant",
+        avatar_emoji=data.get("avatar_emoji") or tpl.avatar_emoji,
+        system_prompt=data.get("system_prompt") or tpl.system_prompt,
+        model_provider=data.get("model_provider") or tpl.model_provider,
+        model_name=data.get("model_name") or tpl.model_name,
+        api_key_ref=data.get("api_key_ref"),
+        skills=tpl.skills or [],
+        capabilities=data.get("capabilities", []),
+        workspace_id=ws,
+    )
+    db.add(teammate)
+    await db.commit()
+    await db.refresh(teammate)
+
+    teammate_cache.invalidate(LIST_KEY)
+    try:
+        await get_state_manager().set_active(teammate.id)
+    except Exception:
+        pass
 
     return {"id": teammate.id, "name": teammate.name}
 
@@ -366,6 +442,80 @@ PRESET_TEMPLATES = [
         "memory_schema": {},
         "automation_defaults": {},
     },
+    # ── Engineering (追加) ──
+    {
+        "name": "Code Reviewer",
+        "category": "engineering",
+        "description": "代码审查员，审查代码质量与架构合理性",
+        "identity": "code-reviewer",
+        "avatar_emoji": "🔍",
+        "system_prompt": "你是一个代码审查员。专注代码正确性、边界情况和架构合理性。直接指出问题，给具体修复建议。不用客套。回复控制在 50-150 字。",
+        "skills": ["code-review", "quality", "refactoring", "best-practices"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "DevOps Engineer",
+        "category": "engineering",
+        "description": "DevOps 工程师，基础设施与 CI/CD 管理",
+        "identity": "devops-engineer",
+        "avatar_emoji": "⚙️",
+        "system_prompt": "你是一个 DevOps 工程师。关注部署可靠性、性能和安全。直接说问题，给可执行命令或配置。别废话。回复控制在 50-150 字。",
+        "skills": ["devops", "ci-cd", "infrastructure", "docker"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Data Analyst",
+        "category": "engineering",
+        "description": "数据分析师，数据洞察与可视化",
+        "identity": "data-analyst",
+        "avatar_emoji": "📊",
+        "system_prompt": "你是一个数据分析师。直接说结论，用具体数字说话。可以质疑数据质量，给出分析方法建议。回复控制在 50-150 字。",
+        "skills": ["data-analysis", "statistics", "visualization", "sql"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    # ── Business (追加) ──
+    {
+        "name": "Content Writer",
+        "category": "business",
+        "description": "文案/内容运营，内容创作与品牌传播",
+        "identity": "content-writer",
+        "avatar_emoji": "✍️",
+        "system_prompt": "你是一个文案写手。直接给成稿，不用讨论中间过程。关注用户痛点和转化。口语化，有网感，不要官方腔。回复控制在 50-150 字。",
+        "skills": ["copywriting", "content-strategy", "storytelling", "branding"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "Project Manager",
+        "category": "business",
+        "description": "项目经理，进度跟踪与资源协调",
+        "identity": "project-manager",
+        "avatar_emoji": "📋",
+        "system_prompt": "你是一个项目经理。关注进度、风险和优先级。直接说当前状态和下一步做什么。别绕。回复控制在 50-150 字。",
+        "skills": ["project-management", "agile", "risk-management", "communication"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
+    {
+        "name": "UX Researcher",
+        "category": "business",
+        "description": "用户研究员，用户需求与体验洞察",
+        "identity": "ux-researcher",
+        "avatar_emoji": "🧐",
+        "system_prompt": "你是一个用户研究员。关注用户行为和需求。直接说发现和建议，引用数据佐证。可以质疑产品假设。回复控制在 50-150 字。",
+        "skills": ["user-research", "usability", "interviewing", "analytics"],
+        "tools": [],
+        "memory_schema": {},
+        "automation_defaults": {},
+    },
 ]
 
 
@@ -380,72 +530,4 @@ def _seed_templates_sync(session):
     session.commit()
 
 
-@router.get("/templates")
-async def list_templates(db: AsyncSession = Depends(get_db)):
-    """Return all blueprint templates, seeding DB on first call."""
-    # ponytail: seed lazily on first read — no startup hook needed
-    from sqlalchemy import func as sa_func
-    cnt = await db.execute(sa_func.count(TeammateTemplate.id))
-    if cnt.scalar() == 0:
-        for tpl in PRESET_TEMPLATES:
-            db.add(TeammateTemplate(**tpl))
-        await db.commit()
 
-    result = await db.execute(select(TeammateTemplate).order_by(TeammateTemplate.category, TeammateTemplate.name))
-    templates = result.scalars().all()
-    return [
-        {
-            "id": t.id,
-            "name": t.name,
-            "category": t.category,
-            "description": t.description,
-            "identity": t.identity,
-            "system_prompt": t.system_prompt,
-            "skills": t.skills or [],
-            "tools": t.tools or [],
-            "memory_schema": t.memory_schema or {},
-            "automation_defaults": t.automation_defaults or {},
-            "avatar_emoji": t.avatar_emoji,
-            "model_provider": t.model_provider,
-            "model_name": t.model_name,
-        }
-        for t in templates
-    ]
-
-
-@router.post("/from-template", dependencies=[Depends(require_admin)])
-async def create_from_template(data: dict, db: AsyncSession = Depends(get_db)):
-    """Create a teammate from a blueprint template."""
-    template_id = data.get("template_id")
-    if not template_id:
-        raise HTTPException(status_code=400, detail="template_id is required")
-
-    result = await db.execute(select(TeammateTemplate).where(TeammateTemplate.id == template_id))
-    tpl = result.scalar_one_or_none()
-    if not tpl:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    name = data.get("name") or tpl.name
-
-    teammate = Teammate(
-        name=name,
-        role=data.get("role") or tpl.identity or "assistant",
-        avatar_emoji=data.get("avatar_emoji") or tpl.avatar_emoji,
-        system_prompt=data.get("system_prompt") or tpl.system_prompt,
-        model_provider=data.get("model_provider") or tpl.model_provider,
-        model_name=data.get("model_name") or tpl.model_name,
-        api_key_ref=data.get("api_key_ref"),
-        skills=tpl.skills or [],
-        capabilities=data.get("capabilities", []),
-    )
-    db.add(teammate)
-    await db.commit()
-    await db.refresh(teammate)
-
-    teammate_cache.invalidate(LIST_KEY)
-    try:
-        await get_state_manager().set_active(teammate.id)
-    except Exception:
-        pass
-
-    return {"id": teammate.id, "name": teammate.name}

@@ -245,6 +245,7 @@ async def list_messages(channel_id: str, limit: int = 200, db: AsyncSession = De
             "id": m.id, "channel_id": m.channel_id, "role": m.role,
             "author_name": m.author_name, "author_id": m.author_id,
             "avatar_emoji": m.avatar_emoji or "🤖",
+            "status": m.status or "unread",
             "content": m.content, "attachments": m.attachments or [],
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
@@ -659,6 +660,7 @@ async def _save_team_response_from_events(
                     message_id=msg_id,        # per-teammate uuid key
                     avatar_emoji=tm_avatar,
                     content=resp["content"],
+                    status="replied",
                 )
                 sess.add(ai_msg)
             await sess.commit()
@@ -679,6 +681,34 @@ async def _save_team_response_from_events(
             )
         except Exception as mem_err:
             logger.debug(f"[MEMORY] Chat memory write skipped: {mem_err}")
+
+        # ── Task 7: Store per-teammate brain fragments from chat ──
+        # ponytail: store each teammate's response as a brain:preferences
+        # fragment. The BrainPage shows this immediately; BrainLoader injects
+        # it into the teammate's system prompt on next interaction.
+        # No LLM extraction — the response content IS the record.
+        try:
+            from backend.services.brain.fragment_store import (
+                get_brain_fragment_store, BrainFragment,
+            )
+            bstore = get_brain_fragment_store()
+            for resp in responses.values():
+                tm_id = resp["teammate_id"]
+                content = resp.get("content", "").strip()
+                if not content or len(content) < 10:
+                    continue
+                frag = BrainFragment(
+                    teammate_id=tm_id,
+                    fragment_type="brain:preferences",
+                    content=content[:300],
+                    confidence=0.6,
+                    source="chat",
+                )
+                await bstore.store(frag)
+            if responses:
+                logger.debug(f"[BRAIN] stored {len(responses)} chat fragments")
+        except Exception as brain_err:
+            logger.debug(f"[BRAIN] chat fragment write skipped: {brain_err}")
 
         # ── Phase 28: parse AI reply for explicit [TASK] directives → board ──
         # ponytail: best-effort. A parse failure must never break message save.

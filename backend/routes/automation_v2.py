@@ -58,8 +58,17 @@ async def reap_orphaned_runs():
         logger.warning("[AUTOv2] orphan reap failed: %s", e)
 
 
-# ── Schemas ──
+async def automation_orphan_reaper_loop(interval: int = 300):
+    """Continuous backstop: even if the process never restarts, periodically
+    reclaim runs that slipped past the wait_for timeout (e.g. a task that hangs
+    without awaiting anything cancellable). Runs forever alongside the app."""
+    await asyncio.sleep(interval)  # first pass already done at startup
+    while True:
+        await reap_orphaned_runs()
+        await asyncio.sleep(interval)
 
+
+# ── Schemas ──
 class CreateJobRequest(BaseModel):
     name: str
     teammate_id: str = ""

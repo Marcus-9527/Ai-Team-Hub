@@ -184,12 +184,22 @@ class TaskExecutor:
 
             # Wait pass (slow, parallel): gather ALL ready waits at once.
             # NO DB writes happen inside — each coroutine only does runtime.wait.
+            logger.info(
+                "[EXECUTOR][GATHER] ENTER batch wait: %d ready step(s): %s",
+                len(submitted),
+                [s.id[:8] for s, _ in submitted],
+            )
             try:
                 results = await asyncio.gather(*[
                     self._wait_parallel(rtid) for s, rtid in submitted
                 ])
                 for (s, _), rt in zip(submitted, results):
                     s._rt_result = rt  # type: ignore[attr-defined]
+                logger.info(
+                    "[EXECUTOR][GATHER] RETURN: %d result(s), statuses=%s",
+                    len(results),
+                    [getattr(rt, "status", None) for rt in results],
+                )
             except Exception as e:
                 logger.error("[EXECUTOR] batch wait failed: %s", e)
                 overall_success = False
@@ -327,7 +337,15 @@ class TaskExecutor:
         serially afterwards (see _finalize_step) so a single AsyncSession is
         never written from two coroutines at once.
         """
-        return await self._runtime.wait(runtime_task_id, timeout=300.0)
+        logger.info("[EXECUTOR][GATHER] sub-task START wait rtid=%s", runtime_task_id[:8])
+        rt = await self._runtime.wait(runtime_task_id, timeout=300.0)
+        logger.info(
+            "[EXECUTOR][GATHER] sub-task END wait rtid=%s status=%s has_error=%s",
+            runtime_task_id[:8],
+            getattr(rt, "status", None),
+            bool(getattr(rt, "error", None)),
+        )
+        return rt
 
     async def _finalize_step(
         self,

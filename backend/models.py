@@ -1093,6 +1093,15 @@ class DAGDefinitionModel(Base):
                          cascade="all, delete-orphan",
                          order_by="DAGNodeModel.created_at")
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 
 class DAGNodeModel(Base):
     """Persistent DAG node — one task in a DAG."""
@@ -1118,6 +1127,27 @@ class DAGNodeModel(Base):
     created_at = Column(DateTime, default=utcnow)
 
     dag = relationship("DAGDefinitionModel", back_populates="nodes")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "dag_id": self.dag_id,
+            "description": self.description,
+            "teammate": self.teammate,
+            "deps": self.deps,
+            "status": self.status,
+            "max_retry": self.max_retry,
+            "retry_count": self.retry_count,
+            "strategy": self.strategy,
+            "require_approval": self.require_approval,
+            "result": self.result,
+            "error": self.error,
+            "execution_id": self.execution_id,
+            "required_skills": self.required_skills,
+            "selected_teammate_id": self.selected_teammate_id,
+            "assigned_at": self.assigned_at,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════

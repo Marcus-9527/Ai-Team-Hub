@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import * as taskApi from '../../services/api/task';
 import * as api from '../../services/api';
+import { getWorkspaceId } from '../../services/auth';
 import { useTranslation } from '../../i18n';
 import TaskDetailView from '../Task/TaskDetailView';
 
@@ -144,11 +145,13 @@ export default function InboxPage({ onNavigate }) {
 
   const load = async () => {
     try {
+      const ws_id = getWorkspaceId();
+      if (!ws_id) { console.warn('[Inbox] no workspace_id, skipping load'); setLoading(false); return; }
       const [execData, planData, pendData, doneData] = await Promise.all([
-        taskApi.listTasks({ status: 'EXECUTING', limit: 10 }),
-        taskApi.listTasks({ status: 'PLANNING', limit: 10 }),
+        taskApi.listTasks({ status: 'EXECUTING', limit: 10, workspace_id: ws_id }),
+        taskApi.listTasks({ status: 'PLANNING', limit: 10, workspace_id: ws_id }),
         api.listPendingProposals().catch(() => ({ proposals: [] })),
-        taskApi.listTasks({ status: 'COMPLETED', limit: 5 }),
+        taskApi.listTasks({ status: 'COMPLETED', limit: 5, workspace_id: ws_id }),
       ]);
       setRunning([...(planData.tasks || []), ...(execData.tasks || [])].slice(0, 5));
       setPending((pendData.proposals || []).slice(0, 5));

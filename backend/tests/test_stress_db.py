@@ -202,12 +202,13 @@ class TestBulkCreateStress:
 
     async def test_list_tasks_performance(self, db_session, state_manager):
         """Verify list_tasks and count_tasks work at scale."""
-        # Create 100 tasks first
+        # create 100 tasks
         for i in range(100):
             task = await state_manager.create_task(
                 db_session,
-                title=f"Perf Test Task {i:04d}",
+                title=f"perf-task-{i:04d}",
                 created_by="perf_test",
+                workspace_id="test-ws",
             )
             for j in range(5):
                 await state_manager.create_step(
@@ -220,7 +221,7 @@ class TestBulkCreateStress:
 
         # list_tasks with limit
         start = time.time()
-        tasks = await state_manager.list_tasks(db_session, limit=100)
+        tasks = await state_manager.list_tasks(db_session, workspace_id="test-ws", limit=100)
         list_time = time.time() - start
         assert len(tasks) == 100
         print(f"\n[QUERY] list_tasks(limit=100): {list_time*1000:.1f}ms")

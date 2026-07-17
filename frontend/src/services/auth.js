@@ -24,6 +24,9 @@ export function clearSession() {
 export function getSessionUser() {
   try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { return null; }
 }
+export function getWorkspaceId() {
+  return localStorage.getItem(WS_KEY);
+}
 export function isLoggedIn() {
   return !!getToken();
 }

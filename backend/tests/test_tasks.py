@@ -141,29 +141,27 @@ class TestTaskStateManagerTaskCRUD:
         assert result is None
 
     async def test_list_tasks(self, db_session, state_mgr):
-        """List all tasks, ordered by created_at desc."""
-        # Create two tasks
-        await state_mgr.create_task(db_session, title="task-a", created_by="test")
-        await state_mgr.create_task(db_session, title="task-b", created_by="test")
-        tasks = await state_mgr.list_tasks(db_session)
+        """List all tasks in a workspace, ordered by created_at desc."""
+        await state_mgr.create_task(db_session, title="task-a", created_by="test", workspace_id="test-ws")
+        await state_mgr.create_task(db_session, title="task-b", created_by="test", workspace_id="test-ws")
+        tasks = await state_mgr.list_tasks(db_session, workspace_id="test-ws")
         assert len(tasks) >= 2
-        # Most recently created first
         assert tasks[0].title == "task-b"
 
     async def test_list_tasks_filter_by_status(self, db_session, state_mgr):
         """Filter tasks by status."""
-        t1 = await state_mgr.create_task(db_session, title="filter-a", created_by="test")
-        await state_mgr.create_task(db_session, title="filter-b", created_by="test")
+        t1 = await state_mgr.create_task(db_session, title="filter-a", created_by="test", workspace_id="test-ws")
+        await state_mgr.create_task(db_session, title="filter-b", created_by="test", workspace_id="test-ws")
         await state_mgr.transition_task_status(db_session, t1, TaskStatus.PLANNING)
-        planning_tasks = await state_mgr.list_tasks(db_session, status=TaskStatus.PLANNING)
+        planning_tasks = await state_mgr.list_tasks(db_session, status=TaskStatus.PLANNING, workspace_id="test-ws")
         assert len(planning_tasks) >= 1
         assert all(t.status == TaskStatus.PLANNING for t in planning_tasks)
 
     async def test_list_tasks_filter_by_channel(self, db_session, state_mgr):
         """Filter tasks by channel_id."""
-        await state_mgr.create_task(db_session, title="ch-a", channel_id="ch1", created_by="test")
-        await state_mgr.create_task(db_session, title="ch-b", channel_id="ch2", created_by="test")
-        ch1_tasks = await state_mgr.list_tasks(db_session, channel_id="ch1")
+        await state_mgr.create_task(db_session, title="ch-a", channel_id="ch1", created_by="test", workspace_id="test-ws")
+        await state_mgr.create_task(db_session, title="ch-b", channel_id="ch2", created_by="test", workspace_id="test-ws")
+        ch1_tasks = await state_mgr.list_tasks(db_session, channel_id="ch1", workspace_id="test-ws")
         assert len(ch1_tasks) >= 1
         assert all(t.channel_id == "ch1" for t in ch1_tasks)
 
@@ -512,10 +510,10 @@ class TestTaskManagerLifecycle:
     async def test_list_with_pagination(self, db_session, task_mgr):
         """TaskManager.list_tasks with limit/offset."""
         for i in range(5):
-            await task_mgr.create_task(db_session, title=f"page-{i}", created_by="test")
+            await task_mgr.create_task(db_session, title=f"page-{i}", created_by="test", workspace_id="test-ws")
 
-        page1 = await task_mgr.list_tasks(db_session, limit=2, offset=0)
+        page1 = await task_mgr.list_tasks(db_session, workspace_id="test-ws", limit=2, offset=0)
         assert len(page1) <= 2
 
-        page2 = await task_mgr.list_tasks(db_session, limit=2, offset=2)
+        page2 = await task_mgr.list_tasks(db_session, workspace_id="test-ws", limit=2, offset=2)
         assert len(page2) <= 2

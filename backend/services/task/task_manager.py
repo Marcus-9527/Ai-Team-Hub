@@ -63,18 +63,18 @@ class TaskManager:
         self,
         db: AsyncSession,
         *,
+        workspace_id: str,
         channel_id: Optional[str] = None,
         status: Optional[str] = None,
-        workspace_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[TaskModel]:
-        """List tasks with optional filters."""
+        """List tasks scoped to a workspace with optional filters."""
         return await self.state.list_tasks(
             db,
+            workspace_id=workspace_id,
             channel_id=channel_id,
             status=status,
-            workspace_id=workspace_id,
             limit=limit,
             offset=offset,
         )

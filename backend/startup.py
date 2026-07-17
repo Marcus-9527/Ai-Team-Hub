@@ -28,9 +28,10 @@ def register_task_hooks():
     from backend.services.memory.memory_event_handler import MemoryTaskHook
     from backend.services.brain.task_hook import BrainTaskHook
     from backend.services.brain.channel_notify_hook import ChannelNotifyHook
+    from backend.services.task.artifact_hook import ArtifactTaskHook
     from backend.services.task.task_hooks import get_task_hook_registry
     registry = get_task_hook_registry()
-    for hook in (MemoryTaskHook(), BrainTaskHook(), ChannelNotifyHook()):
+    for hook in (MemoryTaskHook(), BrainTaskHook(), ChannelNotifyHook(), ArtifactTaskHook()):
         registry.register(hook)
         logger.info("%s registered", hook.__class__.__name__)
 

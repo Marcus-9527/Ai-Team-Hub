@@ -92,21 +92,22 @@ class TaskStateManager:
         self,
         db: AsyncSession,
         *,
+        workspace_id: str,
         channel_id: Optional[str] = None,
         status: Optional[str] = None,
-        workspace_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[TaskModel]:
-        """List tasks with optional filters, ordered by created_at desc."""
+        """List tasks scoped to a workspace, with optional filters, ordered by created_at desc."""
+        if not workspace_id:
+            raise ValueError("workspace_id is required for task listing")
         query = select(TaskModel).options(selectinload(TaskModel.steps))
 
+        query = query.where(TaskModel.workspace_id == workspace_id)
         if channel_id:
             query = query.where(TaskModel.channel_id == channel_id)
         if status:
             query = query.where(TaskModel.status == status)
-        if workspace_id:
-            query = query.where(TaskModel.workspace_id == workspace_id)
 
         query = query.order_by(TaskModel.created_at.desc())
         query = query.limit(limit).offset(offset)

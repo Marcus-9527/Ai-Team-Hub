@@ -452,7 +452,9 @@ async def list_tasks(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """List tasks with optional filters."""
+    """List tasks in a workspace with optional filters."""
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="workspace_id query parameter is required")
     mgr = _get_manager()
     tasks = await mgr.list_tasks(
         db,

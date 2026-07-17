@@ -14,7 +14,8 @@ from fastapi import Depends, Request
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
-LIST_KEY = "all"
+def _list_key(ws: str | None) -> str:
+    return f"channels:{ws}" if ws else "channels:global"
 
 
 def _serialize_channel(ch: Channel) -> dict:
@@ -30,11 +31,10 @@ def _serialize_channel(ch: Channel) -> dict:
 
 @router.get("")
 async def list_channels(request: Request, db: AsyncSession = Depends(get_db)):
-    cached = channel_cache.get(LIST_KEY)
+    ws = ws_id_of(request)
+    cached = channel_cache.get(_list_key(ws))
     if cached is not None:
         return cached
-
-    ws = ws_id_of(request)
     q = select(Channel).order_by(Channel.created_at)
     if ws:
         q = q.where(Channel.workspace_id == ws)
@@ -42,7 +42,7 @@ async def list_channels(request: Request, db: AsyncSession = Depends(get_db)):
     channels = result.scalars().all()
     data = [_serialize_channel(ch) for ch in channels]
 
-    channel_cache.set(LIST_KEY, data)
+    channel_cache.set(_list_key(ws), data)
     for item in data:
         channel_cache.set(item["id"], item)
 
@@ -61,7 +61,7 @@ async def create_channel(data: dict, request: Request, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(channel)
 
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ws))
     item = _serialize_channel(channel)
     channel_cache.set(channel.id, item)
 
@@ -81,7 +81,7 @@ async def get_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
 
     data = _serialize_channel(ch)
     channel_cache.set(channel_id, data)
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ch.workspace_id))
     return data
 
 
@@ -99,7 +99,7 @@ async def update_channel(channel_id: str, data: dict, db: AsyncSession = Depends
     await db.commit()
 
     channel_cache.invalidate(channel_id)
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ch.workspace_id))
     return {"ok": True}
 
 
@@ -113,7 +113,7 @@ async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     channel_cache.invalidate(channel_id)
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ch.workspace_id))
     return {"ok": True}
 
 
@@ -140,7 +140,7 @@ async def add_teammate_to_channel(channel_id: str, teammate_id: str, db: AsyncSe
     await db.commit()
 
     channel_cache.invalidate(channel_id)
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ch.workspace_id))
     teammate_cache.invalidate(f"channel_teammates:{channel_id}")
     return {"ok": True, "teammate_ids": ids}
 
@@ -160,5 +160,5 @@ async def remove_teammate_from_channel(channel_id: str, teammate_id: str, db: As
     await db.commit()
 
     channel_cache.invalidate(channel_id)
-    channel_cache.invalidate(LIST_KEY)
+    channel_cache.invalidate(_list_key(ch.workspace_id))
     return {"ok": True, "teammate_ids": ids}

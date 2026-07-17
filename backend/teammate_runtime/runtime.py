@@ -96,6 +96,7 @@ class TeammateRuntime:
                 teammate_id=teammate_id,
                 action=action_label,
                 result=exec_result,
+                workspace_id=wid,
             )
             decision_summary = reflection.get("decision", "")
             if decision_summary:
@@ -103,6 +104,7 @@ class TeammateRuntime:
                     teammate_id=teammate_id,
                     summary=decision_summary,
                     source_action=action_label,
+                    workspace_id=wid,
                 )
 
             # 6. Decide continue / stop

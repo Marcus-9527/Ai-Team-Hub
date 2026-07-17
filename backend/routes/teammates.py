@@ -16,7 +16,9 @@ from backend.services.brain.fragment_store import get_brain_fragment_store
 
 router = APIRouter(prefix="/api/teammates", tags=["teammates"])
 
-LIST_KEY = "all"
+
+def _list_key(ws: str | None) -> str:
+    return f"teammates:{ws}" if ws else "teammates:global"
 
 
 def _serialize_teammate(t: Teammate) -> dict:
@@ -40,7 +42,7 @@ def _serialize_teammate(t: Teammate) -> dict:
 @router.get("")
 async def list_teammates(request: Request, db: AsyncSession = Depends(get_db)):
     # Try cache first
-    cached = teammate_cache.get(LIST_KEY)
+    cached = teammate_cache.get(_list_key(ws_id_of(request)))
     if cached is not None:
         return cached
 
@@ -53,7 +55,7 @@ async def list_teammates(request: Request, db: AsyncSession = Depends(get_db)):
     data = [_serialize_teammate(t) for t in teammates]
 
     # Populate both list cache and individual caches
-    teammate_cache.set(LIST_KEY, data)
+    teammate_cache.set(_list_key(ws), data)
     for item in data:
         teammate_cache.set(item["id"], item)
 
@@ -80,7 +82,7 @@ async def create_teammate(data: dict, request: Request, db: AsyncSession = Depen
     await db.refresh(teammate)
 
     # Invalidate list cache; cache the new item
-    teammate_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(_list_key(ws))
     item = _serialize_teammate(teammate)
     teammate_cache.set(teammate.id, item)
 
@@ -163,7 +165,7 @@ async def create_from_template(data: dict, request: Request, db: AsyncSession = 
     await db.commit()
     await db.refresh(teammate)
 
-    teammate_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(_list_key(ws))
     try:
         await get_state_manager().set_active(teammate.id)
     except Exception:
@@ -187,7 +189,7 @@ async def get_teammate(teammate_id: str, db: AsyncSession = Depends(get_db)):
     data = _serialize_teammate(t)
     teammate_cache.set(teammate_id, data)
     # Also invalidate list since it may be stale
-    teammate_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(_list_key(t.workspace_id))
     return data
 
 
@@ -205,7 +207,7 @@ async def update_teammate(teammate_id: str, data: dict, db: AsyncSession = Depen
 
     # Invalidate caches
     teammate_cache.invalidate(teammate_id)
-    teammate_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(_list_key(t.workspace_id))
 
     # If system_prompt changed, invalidate all warming + memory for this teammate
     if "system_prompt" in data:
@@ -226,7 +228,7 @@ async def delete_teammate(teammate_id: str, db: AsyncSession = Depends(get_db)):
 
     # Invalidate caches
     teammate_cache.invalidate(teammate_id)
-    teammate_cache.invalidate(LIST_KEY)
+    teammate_cache.invalidate(_list_key(t.workspace_id))
 
     return {"ok": True}
 

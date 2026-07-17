@@ -129,9 +129,12 @@ class MemoryService:
 
     # ── Write ─────────────────────────────────────────────────
 
-    async def store(self, item: MemoryItem) -> str:
+    async def store(self, item: MemoryItem, *, workspace_id: str = "") -> str:
         """Persist a single MemoryItem. Returns its id."""
         await self._ensure_table()
+        meta = item.metadata or {}
+        if workspace_id:
+            meta = {**meta, "workspace_id": workspace_id}
         async with engine.connect() as conn:
             await conn.execute(
                 text(INSERT_SQL),
@@ -143,7 +146,7 @@ class MemoryService:
                     "relevance_score": item.relevance_score,
                     "embedding_json": json.dumps(item.embedding),
                     "created_at": item.created_at.isoformat(),
-                    "metadata_json": json.dumps(item.metadata, ensure_ascii=False),
+                    "metadata_json": json.dumps(meta, ensure_ascii=False),
                 },
             )
             await conn.commit()
@@ -288,11 +291,19 @@ class MemoryService:
                  reverse=True)
         return out[:limit]
 
-    async def stats(self) -> dict:
-        """Get storage statistics."""
+    async def stats(self, *, workspace_id: Optional[str] = None) -> dict:
+        """Get storage statistics, optionally filtered by workspace_id."""
         await self._ensure_table()
+        if workspace_id:
+            sql = """
+                SELECT memory_type, COUNT(*) as cnt FROM memory_items
+                WHERE json_extract(metadata_json, '$.workspace_id') = :ws
+                GROUP BY memory_type
+            """
+        else:
+            sql = COUNT_SQL
         async with engine.connect() as conn:
-            result = await conn.execute(text(COUNT_SQL))
+            result = await conn.execute(text(sql), {"ws": workspace_id} if workspace_id else {})
             rows = result.fetchall()
 
         by_type = {row[0]: row[1] for row in rows}

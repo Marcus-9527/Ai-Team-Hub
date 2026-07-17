@@ -201,13 +201,35 @@ class MemoryInsightStore:
         task_id: str = "",
         limit: int = 50,
         offset: int = 0,
+        workspace_id: Optional[str] = None,
     ) -> list[MemoryInsight]:
-        """List insights by task, ordered by priority + recency."""
+        """List insights by task (or all if task_id empty), optionally filtered by workspace_id."""
         await self._ensure_table()
+        if workspace_id:
+            sql = """
+                SELECT * FROM memory_insights
+                WHERE (:task_id = '' OR source_task_id = :task_id)
+                  AND json_extract(metadata_json, '$.workspace_id') = :ws
+                ORDER BY
+                    CASE type
+                        WHEN 'RISK_WARNING'     THEN 0
+                        WHEN 'FAILURE_PATTERN'  THEN 1
+                        WHEN 'OPTIMIZATION'     THEN 2
+                        WHEN 'SUCCESS_PATTERN'  THEN 3
+                        ELSE 99
+                    END,
+                    created_at DESC
+                LIMIT :limit
+                OFFSET :offset
+            """
+        else:
+            sql = SELECT_BY_TASK_SQL
         async with engine.connect() as conn:
             result = await conn.execute(
-                text(SELECT_BY_TASK_SQL),
-                {"task_id": task_id, "limit": limit, "offset": offset},
+                text(sql),
+                {"task_id": task_id, "limit": limit, "offset": offset, "ws": workspace_id}
+                if workspace_id
+                else {"task_id": task_id, "limit": limit, "offset": offset},
             )
             rows = result.fetchall()
         return [self._row_to_insight(row) for row in rows]
@@ -228,11 +250,20 @@ class MemoryInsightStore:
             rows = result.fetchall()
         return [self._row_to_insight(row) for row in rows]
 
-    async def get_recent(self, limit: int = 20) -> list[MemoryInsight]:
-        """Get most recent insights."""
+    async def get_recent(self, limit: int = 20, *, workspace_id: Optional[str] = None) -> list[MemoryInsight]:
+        """Get most recent insights, optionally filtered by workspace_id."""
         await self._ensure_table()
+        if workspace_id:
+            sql = """
+                SELECT * FROM memory_insights
+                WHERE json_extract(metadata_json, '$.workspace_id') = :ws
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """
+        else:
+            sql = SELECT_RECENT_SQL
         async with engine.connect() as conn:
-            result = await conn.execute(text(SELECT_RECENT_SQL), {"limit": limit})
+            result = await conn.execute(text(sql), {"limit": limit, "ws": workspace_id} if workspace_id else {"limit": limit})
             rows = result.fetchall()
         return [self._row_to_insight(row) for row in rows]
 

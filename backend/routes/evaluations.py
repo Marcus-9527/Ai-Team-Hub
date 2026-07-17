@@ -2,8 +2,8 @@
 routes/evaluations.py — Evaluation System API (Phase 6)
 
 Endpoints:
-  GET /api/evaluations/{execution_id}  — Get evaluation for an execution
   GET /api/evaluations/stats           — Aggregate evaluation statistics
+  GET /api/evaluations/{execution_id}  — Get evaluation for an execution
 """
 from __future__ import annotations
 
@@ -19,6 +19,15 @@ logger = logging.getLogger("routes.evaluations")
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 
 _eval_service = EvaluationService()
+
+
+# ── Stats (must precede /{execution_id} to avoid wildcard swallowing) ──
+
+
+@router.get("/stats")
+async def evaluation_stats():
+    """Aggregate evaluation statistics across all executions."""
+    return await _eval_service.stats()
 
 
 # ── Get evaluation for an execution ──
@@ -41,12 +50,3 @@ async def get_evaluation(execution_id: str):
         ev = await _eval_service.evaluate(execution_id, rec.to_dict())
 
     return ev.to_dict()
-
-
-# ── Stats ──
-
-
-@router.get("/stats")
-async def evaluation_stats():
-    """Aggregate evaluation statistics across all executions."""
-    return await _eval_service.stats()

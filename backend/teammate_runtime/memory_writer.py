@@ -21,7 +21,8 @@ logger = logging.getLogger("teammate_runtime.memory_writer")
 
 
 async def save_execution(teammate_id: str, action: str,
-                         result: Optional[dict] = None) -> None:
+                         result: Optional[dict] = None,
+                         workspace_id: str = "") -> None:
     """Save action + result as EXECUTION memory."""
     content = json.dumps({
         "action": action,
@@ -35,11 +36,12 @@ async def save_execution(teammate_id: str, action: str,
         created_at=datetime.now(timezone.utc),
     )
     svc = get_memory_service()
-    await svc.store(item)
+    await svc.store(item, workspace_id=workspace_id)
 
 
 async def save_decision(teammate_id: str, summary: str,
-                        source_action: str = "") -> None:
+                        source_action: str = "",
+                        workspace_id: str = "") -> None:
     """Save a decision summary as DECISION memory."""
     content = json.dumps({
         "decision": summary[:500],

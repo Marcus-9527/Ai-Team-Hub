@@ -158,10 +158,11 @@ class MemoryIntelligenceService:
         task_id: str = "",
         limit: int = 50,
         offset: int = 0,
+        workspace_id: Optional[str] = None,
     ) -> list[MemoryInsight]:
         try:
             return await self._store.list_insights(
-                task_id=task_id, limit=limit, offset=offset,
+                task_id=task_id, limit=limit, offset=offset, workspace_id=workspace_id,
             )
         except Exception as e:
             logger.warning(f"[INTELLIGENCE] list_insights error: {e}")

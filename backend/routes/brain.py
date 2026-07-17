@@ -34,16 +34,17 @@ router = APIRouter(prefix="/api/brain", tags=["brain"])
 
 
 @router.get("")
-async def brain_overview():
+async def brain_overview(request: Request):
     """Aggregate memory stats, recent insights, evaluation summary."""
+    ws = ws_id_of(request)
     svc = get_memory_service()
     intel = get_intelligence_service()
     eval_svc = EvaluationService()
 
-    memory_counts = await svc.stats()
+    memory_counts = await svc.stats(workspace_id=ws)
 
     async with async_session() as db:
-        insights = await intel.list_insights(limit=20)
+        insights = await intel.list_insights(limit=20, workspace_id=ws)
         eval_stats = await eval_svc.stats(db)
         recent_evaluations = await eval_svc.list_evaluations(db, limit=10)
 
@@ -56,21 +57,27 @@ async def brain_overview():
 
 
 @router.get("/memory")
-async def brain_memory(source_id: str = "", memory_type: str = "", limit: int = 100):
+async def brain_memory(request: Request, source_id: str = "", memory_type: str = "", limit: int = 100):
     """Query memory items directly."""
     svc = get_memory_service()
+    ws = ws_id_of(request)
     items = await svc.query(source_id=source_id or None, memory_type=memory_type or None, limit=limit)
+    if ws:
+        # ponytail: post-filter by workspace_id in metadata; scale ceiling ~10K rows
+        items = [it for it in items if it.metadata.get("workspace_id") == ws]
     return {"items": [it.to_dict() for it in items], "count": len(items)}
 
 
 @router.get("/search")
-async def brain_search(q: str = Query("", description="Search query"), top_k: int = 10):
+async def brain_search(request: Request, q: str = Query("", description="Search query"), top_k: int = 10):
     """Semantic search over memory items."""
     if not q:
         return {"items": [], "count": 0}
     svc = get_memory_service()
+    ws = ws_id_of(request)
     vec = svc.compute_embedding(q)
-    items = await svc.semantic_search(vec, top_k=top_k, min_score=0.1)
+    mf = {"workspace_id": ws} if ws else None
+    items = await svc.semantic_search(vec, top_k=top_k, min_score=0.1, metadata_filters=mf)
     return {"items": [it.to_dict() for it in items], "count": len(items)}
 
 

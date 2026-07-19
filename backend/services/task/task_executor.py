@@ -288,6 +288,10 @@ class TaskExecutor:
 
         context = await self.context_builder.build_maeos_description(db, task, step)
         step = await self.state.transition_step_status(db, step, TaskStepStatus.RUNNING)
+        # ponytail: release transaction so the next step's SELECT on the same
+        # session doesn't hang on a dirty connection. expire_on_commit=False
+        # keeps ORM objects accessible after commit.
+        await db.commit()
         events.log_step_started(
             step_id=step.id, step_order=step.order, attempt=attempt,
             teammate_id=step.teammate_id or "",
@@ -325,14 +329,7 @@ class TaskExecutor:
         serially afterwards (see _finalize_step) so a single AsyncSession is
         never written from two coroutines at once.
         """
-        logger.info("[EXECUTOR][GATHER] sub-task START wait rtid=%s", runtime_task_id[:8])
         rt = await self._runtime.wait(runtime_task_id, timeout=300.0)
-        logger.info(
-            "[EXECUTOR][GATHER] sub-task END wait rtid=%s status=%s has_error=%s",
-            runtime_task_id[:8],
-            getattr(rt, "status", None),
-            bool(getattr(rt, "error", None)),
-        )
         return rt
 
     async def _finalize_step(

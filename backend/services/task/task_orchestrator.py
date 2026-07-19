@@ -266,7 +266,7 @@ class TaskOrchestrator:
             )
             if dag and dag.nodes:
                 return dag
-        except (PlanningError, ImportError, RuntimeError, asyncio.TimeoutError) as e:
+        except (PlanningError, ImportError, RuntimeError, ValueError, asyncio.TimeoutError) as e:
             logger.warning("[ORCH] PlanningEngine: %s", e)
 
         # Fallback: keyword → teammates → DAG
@@ -274,7 +274,7 @@ class TaskOrchestrator:
         print("[ORCH-FB] Starting fallback...", flush=True)
         analyzer = TaskAnalyzer()
         print("[ORCH-FB] Created analyzer", flush=True)
-        analysis = analyzer.analyze(goal)
+        analysis = await asyncio.to_thread(analyzer.analyze, goal)
         print(f"[ORCH-FB] Analysis: type={analysis.task_type}", flush=True)
         skills = SkillRegistry.get_skills(analysis.task_type)
         print(f"[ORCH-FB] Skills: {skills}", flush=True)
@@ -493,12 +493,7 @@ class TaskOrchestrator:
         return await self._manager.get_task(db, task_id)
 
     async def _execute(self, db: AsyncSession, task: TaskModel) -> TaskModel:
-        """Transition to RUNNING and run through TaskExecutor.
-
-        COMMIT before runtime: the async session's write lock must be
-        released so the sync DBExecutionStore (used inside the runtime
-        scheduler) can write without blocking the event loop.
-        """
+        """Transition to RUNNING and run through TaskExecutor."""
         task = await self._manager.start_execution(db, task.id)
         await db.commit()
         if self._runtime is None:

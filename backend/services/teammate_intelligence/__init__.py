@@ -344,6 +344,23 @@ class TeammateSelector:
             q = q.order_by(Teammate.created_at)
             result = await session.execute(q)
             teammates = list(result.scalars().all())
+
+            # ponytail: specific-skill filter excluded everyone → retry without
+            # filter so planning can always produce steps.  Same pattern as
+            # routes/tasks.py fallback, but in the shared function so every
+            # caller (orchestrator, routes, dag_executor) benefits without
+            # copy-pasting guards everywhere.
+            _match_skills = required_skills
+            if not teammates and required_skills:
+                q2 = select(Teammate)
+                if exclude_teammate_names:
+                    q2 = q2.where(Teammate.name.notin_(exclude_teammate_names))
+                q2 = q2.order_by(Teammate.created_at)
+                r2 = await session.execute(q2)
+                teammates = list(r2.scalars().all())
+                if teammates:
+                    _match_skills = []  # _compute_match returns 0.5 grace
+
             if not teammates:
                 return []
 
@@ -363,7 +380,7 @@ class TeammateSelector:
                     continue
                 profile = TeammateProfile.from_orm(t)
                 skill_score = TeammateSelector._compute_match(
-                    profile.skills, required_skills
+                    profile.skills, _match_skills
                 )
                 exp_score = profile.average_score
                 mem_score = TeammateSelector._memory_score(profile)

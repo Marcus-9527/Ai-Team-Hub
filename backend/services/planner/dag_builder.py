@@ -51,6 +51,12 @@ class DAGBuilder:
                 required_skills=skills,
                 require_approval=step.requires_approval,
             )
+            # Carry concrete teammate UUID through so _assign_and_save
+            # doesn't re-assign this node via claim-pinning. Only set
+            # when it's a real UUID (has dashes), not an abstract LLM
+            # placeholder like "teammate_a" — those need real assignment.
+            if step.teammate_id and "-" in step.teammate_id:
+                node.selected_teammate_id = step.teammate_id
             dag.add_node(node)
             order_to_id[step.order] = node.id
 

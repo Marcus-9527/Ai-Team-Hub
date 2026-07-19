@@ -549,7 +549,13 @@ async def stream_teammate(
                     buffered_chunks = []
                     continue
             else:
-                continue
+                yield _emit_event(
+                    event_type="teammate_message",
+                    message_id=message_id,
+                    role=role,
+                    phase=phase,
+                    payload={"content": chunk, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+                )
     except Exception as e:
         logger.warning(f"Teammate {teammate.get('name', '?')} ({role}) stream failed: {e}")
         for ev in _emit_placeholder_then_error(
@@ -560,6 +566,22 @@ async def stream_teammate(
         return
 
     full_text = full_text.strip()
+
+    # Ponytail: flush any remaining buffered chunks (short responses < ~60 chars
+    # with no newline never hit the aggressive flush above). After emitting,
+    # mark early_done so teammate_end fires.
+    if buffered_chunks and not early_done:
+        for c in buffered_chunks:
+            yield _emit_event(
+                event_type="teammate_message",
+                message_id=message_id,
+                role=role,
+                phase=phase,
+                payload={"content": c, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+            )
+        buffered_chunks = []
+        early_done = True
+
     already_streamed = early_done and not buffered_chunks
 
     if not already_streamed and (full_text == "[NO_NEW_INFO]" or full_text.endswith("[NO_NEW_INFO]")):

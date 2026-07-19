@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FolderKanban, FileText, GitCommit, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronRight, Code, Terminal, ExternalLink } from 'lucide-react';
 import * as api from '../../services/api';
-import { BASE, authFetch } from '../../services/auth';
+import * as taskApi from '../../services/api/task';
 
 const STATUS_COLORS = {
   COMPLETED: 'text-green-600 bg-green-50 border-green-200',
@@ -26,8 +26,7 @@ export default function WorkspaceExplorer() {
     setLoading(true);
     try {
       // Fetch recent tasks
-      const resp = await authFetch(`${BASE}/api/tasks?limit=20`);
-      const data = await resp.json();
+      const data = await taskApi.listTasks({ limit: 20 });
       setTasks(data.tasks || data || []);
 
       // Pre-load artifacts for each task

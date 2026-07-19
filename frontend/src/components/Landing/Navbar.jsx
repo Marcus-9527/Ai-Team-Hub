@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
-import { useTranslation, SUPPORTED_LANGUAGES } from '../../i18n';
+import { useTranslation } from '../../i18n';
 
 const NAV_ITEMS = [
   { id: 'features', key: 'landing.menu.features', href: '#features' },
@@ -14,7 +14,7 @@ const SOCIAL_LINKS = [
   { name: 'Discord', url: 'https://discord.com' },
 ];
 
-export default function Navbar({ onEnterApp, lang, changeLang }) {
+export default function Navbar({ onEnterApp }) {
   const t = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [blendModeNormal, setBlendModeNormal] = useState(false);
@@ -24,9 +24,6 @@ export default function Navbar({ onEnterApp, lang, changeLang }) {
   const tlRef = useRef(null);
   const itemsRef = useRef([]);
   const underlineRefs = useRef([]);
-  const langRowRef = useRef(null);
-
-  const currentLang = SUPPORTED_LANGUAGES.find(l => l.id === lang) || SUPPORTED_LANGUAGES[1];
 
   const getBtnCenter = () => {
     if (!btnRef.current) return { x: window.innerWidth - 40, y: 40 };
@@ -77,11 +74,6 @@ export default function Navbar({ onEnterApp, lang, changeLang }) {
   const handleNavClick = (href) => {
     setMenuOpen(false);
     setTimeout(() => { const el = document.querySelector(href); if (el) el.scrollIntoView({ behavior: 'smooth' }); }, 700);
-  };
-
-  const handleLangChange = (newLang) => {
-    changeLang(newLang);
-    setMenuOpen(false);
   };
 
   const textColor = blendModeNormal ? '#000' : '#fff';
@@ -136,28 +128,7 @@ export default function Navbar({ onEnterApp, lang, changeLang }) {
             ))}
           </nav>
 
-          {/* Language row — inline like social links */}
-          <div className="menu-lang-row" ref={langRowRef}
-            style={{ marginTop: '48px', display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '4px' }}>
-            {SUPPORTED_LANGUAGES.map((l) => {
-              const isActive = l.id === lang;
-              return (
-                <button key={l.id} onClick={() => handleLangChange(l.id)}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '6px 10px', borderRadius: '4px',
-                    fontSize: '12px', fontWeight: isActive ? 600 : 400,
-                    letterSpacing: '0.04em', color: isActive ? '#fc1c46' : '#888',
-                    transition: 'color 0.25s ease, background 0.25s ease',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#000'; e.currentTarget.style.background = '#f0f0f0'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = isActive ? '#fc1c46' : '#888'; e.currentTarget.style.background = 'none'; }}>
-                  {l.name}
-                </button>
-              );
-            })}
-          </div>
-
+          {/* CTA button */}
           <div className="menu-cta" style={{ marginTop: '40px' }}>
             <button onClick={() => { setMenuOpen(false); onEnterApp(); }}
               style={{ background: '#fc1c46', color: '#fff', border: 'none', padding: '20px 52px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.08em' }}>

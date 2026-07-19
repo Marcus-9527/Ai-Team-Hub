@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Target, Loader2, PlayCircle, MessageSquare,
@@ -6,7 +6,6 @@ import {
 import * as taskApi from '../services/api/task';
 import { useTranslation } from '../i18n';
 import TaskDetailView from './Task/TaskDetailView';
-import TaskProgressPanel from './Task/TaskProgressPanel';
 
 /* ── Goal input (initial state) ── */
 function GoalInput({ onSubmit, loading, onOpenTopic }) {
@@ -67,23 +66,15 @@ function GoalInput({ onSubmit, loading, onOpenTopic }) {
 export default function TaskModeView({ onNavigate }) {
   const t = useTranslation();
   const [task, setTask] = useState(null);
-  const [steps, setSteps] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
   const loadTask = useCallback(async (taskId) => {
     if (!taskId) return;
-    setLoading(true);
     try {
       const data = await taskApi.getTask(taskId);
       setTask(data);
-      const prog = await taskApi.getTaskProgress(taskId).catch(() => null);
-      setSteps(prog?.steps || data?.steps || []);
     } catch (e) {
       console.error(e);
     }
-    setLoading(false);
   }, []);
 
   const handleSubmitGoal = async (goal) => {
@@ -95,7 +86,6 @@ export default function TaskModeView({ onNavigate }) {
         priority: 2,
       });
       setTask(newTask);
-      setSteps([]);
       // Backend auto-runs plan+execute in background on createTask.
       // Do NOT call /plan or /execute here — that double-triggers the
       // orchestrator and spawns duplicate steps that hang forever.
@@ -106,40 +96,12 @@ export default function TaskModeView({ onNavigate }) {
     setCreating(false);
   };
 
-  // Advanced mode fallback
-  if (showAdvanced && task) {
-    return (
-      <div className="flex-1 flex flex-col h-full">
-        <div className="h-10 flex items-center px-4 border-b border-hairline bg-white flex-shrink-0">
-          <button
-            onClick={() => setShowAdvanced(false)}
-            className="flex items-center gap-1.5 text-xs text-ink-mute hover:text-ink transition-all"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-            {t('task.back_simple')}
-          </button>
-          <span className="ml-auto text-[10px] text-ink-faint">{t('task.advanced_mode')}</span>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <TaskDetailView taskId={task.id} onBack={() => setShowAdvanced(false)} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col h-full">
       {!task ? (
         <GoalInput onSubmit={handleSubmitGoal} loading={creating} onOpenTopic={() => onNavigate?.('new-topic')} />
       ) : (
-        <TaskProgressPanel
-          task={task}
-          steps={steps}
-          loading={loading}
-          onBack={() => setTask(null)}
-          onRefresh={() => loadTask(task.id)}
-          onViewAdvanced={() => setShowAdvanced(true)}
-        />
+        <TaskDetailView taskId={task.id} onBack={() => setTask(null)} />
       )}
     </div>
   );

@@ -142,69 +142,10 @@ export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
         {!isEdit && (
           <div className="flex gap-1.5 mb-4 pb-4 border-b border-hairline">
             {tabBtn('manual', '手动创建')}
-            {tabBtn('template', '从模板创建')}
           </div>
         )}
 
-        {mode === 'template' && !isEdit ? (
-          /* ── Template mode ── */
-          <div>
-            {/* Category filter */}
-            <div className="flex gap-1.5 mb-4">
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setCategory(cat.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-pill text-xs font-semibold transition-all ${
-                    category === cat.id
-                      ? 'bg-primary text-white shadow-sm'
-                      : 'bg-surface-hover text-ink-mute hover:bg-surface-active'
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-
-            {loadingTemplates ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 size={20} className="animate-spin text-ink-faint" />
-              </div>
-            ) : filteredTemplates.length === 0 ? (
-              <p className="text-sm text-ink-faint text-center py-8">暂无模板</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2.5">
-                {filteredTemplates.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => handleCreateFromTemplate(tpl)}
-                    disabled={creatingTpl === tpl.id}
-                    className="rounded-xl border border-hairline bg-white p-3 text-left hover:shadow-sm hover:border-primary/30 transition-all text-start disabled:opacity-50"
-                  >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-lg">{tpl.avatar_emoji || '🤖'}</span>
-                      <span className="text-sm font-semibold text-ink leading-tight truncate">{tpl.name}</span>
-                    </div>
-                    <p className="text-[11px] text-ink-faint leading-relaxed line-clamp-2">{tpl.description}</p>
-                    {tpl.skills?.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {tpl.skills.slice(0, 3).map((s) => (
-                          <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full bg-canvas text-ink-faint">{s}</span>
-                        ))}
-                      </div>
-                    )}
-                    {creatingTpl === tpl.id && (
-                      <div className="flex items-center gap-1 mt-2 text-[10px] text-primary font-semibold">
-                        <Loader2 size={10} className="animate-spin" /> 创建中…
-                      </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* ── Manual mode (also always for edit) ── */
+        {/* ── Manual mode (also always for edit) ── */}
           <div>
             {fieldLabel(t('teammate.chat_role'))}
             <input
@@ -300,7 +241,6 @@ export default function CreateTeammateModal({ teammate, onClose, onCreated }) {
               </button>
             </div>
           </div>
-        )}
       </motion.div>
     </div>
   );

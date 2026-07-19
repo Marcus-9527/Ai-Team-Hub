@@ -45,7 +45,7 @@ export default function ApprovalQueuePage({ onBack }) {
   const handleApprove = useCallback(async (aid) => {
     setActionLoading(aid);
     try { await taskApi.approveApproval(aid); await load(); }
-    catch (e) { alert('批准失败: ' + e.message); }
+    catch (e) { console.error('[ApprovalQueue] approve failed:', e); }
     finally { setActionLoading(null); }
   }, [load]);
 
@@ -56,7 +56,7 @@ export default function ApprovalQueuePage({ onBack }) {
     try {
       await taskApi.rejectApproval(aid, { reason: reason || '用户拒绝' });
       await load();
-    } catch (e) { alert('拒绝失败: ' + e.message); }
+    } catch (e) { console.error('[ApprovalQueue] reject failed:', e); }
     finally { setActionLoading(null); }
   }, [load]);
 

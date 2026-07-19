@@ -123,7 +123,7 @@ function Root() {
         <Routes>
           <Route
             path="/"
-            element={<LandingPage onEnterApp={() => navigate('/auth')} lang={lang} changeLang={setLang} />}
+            element={<LandingPage onEnterApp={() => navigate('/auth')} />}
           />
           <Route path="/pitch" element={<PitchDeck onBack={() => navigate('/')} />} />
           <Route path="/auth" element={<AuthPage onAuth={handleAuth} />} />

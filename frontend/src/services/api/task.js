@@ -5,16 +5,35 @@
  * All methods return parsed JSON, throw on non-2xx.
  */
 import { BASE, authHeaders } from '../auth';
+import { toast } from '../toast';
+
+const TIMEOUT_MS = 15000;
 
 async function request(url, options = {}) {
-  const res = await fetch(`${BASE}${url}`, {
-    headers: { ...authHeaders(), ...options.headers },
-    ...options,
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${BASE}${url}`, {
+      headers: { ...authHeaders(), ...options.headers },
+      ...options,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    const msg = e.name === 'AbortError'
+      ? '请求超时,后端可能没有响应'
+      : '无法连接后端,请检查服务是否已启动';
+    toast(msg);
+    throw new Error(msg);
+  }
+  clearTimeout(timer);
+
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
     try { msg = JSON.parse(text).detail || text; } catch {}
+    toast(msg);
     throw new Error(msg);
   }
   return res.json();

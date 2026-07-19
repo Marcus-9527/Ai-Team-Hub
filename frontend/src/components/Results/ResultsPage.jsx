@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Download, Clock, Loader2, FileCode, FileImage, File } from 'lucide-react';
 import * as api from '../../services/api';
-import { authFetch } from '../../services/auth';
 import { useTranslation } from '../../i18n';
 
 const FILE_ICONS = {
@@ -19,11 +18,8 @@ export default function ResultsPage({ lang }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await authFetch(`${BASE}/api/artifacts`);
-        if (res.ok) {
-          const data = await res.json();
-          setArtifacts(Array.isArray(data) ? data : data?.items || []);
-        }
+        const data = await api.listArtifacts();
+        setArtifacts(Array.isArray(data) ? data : data?.items || []);
       } catch (e) { console.error(e); }
       setLoading(false);
     })();

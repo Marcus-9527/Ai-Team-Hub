@@ -45,6 +45,7 @@ export const authMe = () => request('/api/auth/me');
 
 // ── Health ──
 export const healthCheck = () => request('/api/health');
+export const getDashboard = () => request('/api/dashboard');
 
 // ── Channels ──
 export const listChannels = () => request('/api/channels');

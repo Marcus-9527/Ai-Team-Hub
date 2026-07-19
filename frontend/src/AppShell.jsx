@@ -13,7 +13,6 @@ const TaskModeView = lazy(() => import('./components/TaskModeView'));
 const ProjectsPage = lazy(() => import('./components/Projects/ProjectsPage'));
 const TeamPage = lazy(() => import('./components/Team/TeamPage'));
 const DashboardPage = lazy(() => import('./components/Dashboard/DashboardPage'));
-const InboxPage = lazy(() => import('./components/Inbox/InboxPage'));
 const BrainPage = lazy(() => import('./components/Brain/BrainPage'));
 const ProposalApprovalPage = lazy(() => import('./components/Brain/ProposalApprovalPage'));
 const ApprovalQueuePage = lazy(() => import('./components/Approval/ApprovalQueuePage'));
@@ -28,7 +27,7 @@ function ViewFallback() {
 }
 
 export default function AppShell({ onNavigateToLanding }) {
-  const [view, setView] = useState('inbox');
+  const [view, setView] = useState('tasks');
   const [channelId, setChannelId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -95,14 +94,10 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'projects-' + refreshKey;
     ViewComponent = ProjectsPage;
     viewProps = {};
-  } else if (view === 'inbox') {
-    viewKey = 'inbox-' + refreshKey;
-    ViewComponent = InboxPage;
-    viewProps = { onNavigate: handleNavigate, setChannelId };
   } else if (view === 'brain') {
     viewKey = 'brain-' + refreshKey;
     ViewComponent = BrainPage;
-    viewProps = { channelId, onBack: () => setView('inbox') };
+    viewProps = { channelId, onBack: () => setView('tasks') };
   } else if (view === 'team') {
     viewKey = 'team-' + refreshKey;
     ViewComponent = TeamPage;
@@ -110,7 +105,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'dashboard') {
     viewKey = 'dashboard-' + refreshKey;
     ViewComponent = DashboardPage;
-    viewProps = { onBack: () => setView('inbox') };
+    viewProps = { onBack: () => setView('tasks') };
   } else if (view === 'proposals') {
     viewKey = 'proposals-' + refreshKey;
     ViewComponent = ProposalApprovalPage;
@@ -118,7 +113,7 @@ export default function AppShell({ onNavigateToLanding }) {
   } else if (view === 'approvals') {
     viewKey = 'approvals-' + refreshKey;
     ViewComponent = ApprovalQueuePage;
-    viewProps = { onBack: () => setView('inbox') };
+    viewProps = { onBack: () => setView('tasks') };
   } else if (view === 'ai-ops') {
     viewKey = 'ai-ops-' + refreshKey;
     ViewComponent = AutonomousCenter;
@@ -136,8 +131,8 @@ export default function AppShell({ onNavigateToLanding }) {
     ViewComponent = SystemHealthView;
     viewProps = {};
   } else {
-    viewKey = 'inbox-' + refreshKey;
-    ViewComponent = InboxPage;
+    viewKey = 'tasks-' + refreshKey;
+    ViewComponent = TaskModeView;
     viewProps = { onNavigate: handleNavigate };
   }
 

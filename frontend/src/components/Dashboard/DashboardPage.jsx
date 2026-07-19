@@ -10,13 +10,7 @@ import {
   Users, Activity, Brain, TrendingUp, DollarSign,
   Cpu, CheckCircle2, XCircle, Loader2, BarChart3,
 } from 'lucide-react';
-import { BASE, authFetch } from '../../services/auth';
-
-async function fetchJSON(url) {
-  const res = await authFetch(`${BASE}${url}`);
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
+import * as api from '../../services/api';
 
 function StatCard({ icon: Icon, label, value, color, sub }) {
   return (
@@ -53,7 +47,7 @@ export default function DashboardPage({ onBack }) {
     (async () => {
       try {
         setLoading(true);
-        const d = await fetchJSON('/api/dashboard');
+        const d = await api.getDashboard();
         setData(d);
       } catch (e) {
         setError(e.message);
@@ -99,88 +93,51 @@ export default function DashboardPage({ onBack }) {
           </div>
         </div>
 
-        {/* ── Team Overview ── */}
-        <section>
+        {/* Execution Stats */}
+        <div>
           <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
-            <Users size={14} /> 团队概览
+            <Activity size={15} className="text-indigo-500" /> 执行统计
           </h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard icon={Users} label="队友数量" value={tm?.total_teammates} color="bg-blue-100" />
-            <StatCard icon={Activity} label="总执行次数" value={tm?.total_executions} color="bg-green-100" />
-            <StatCard icon={TrendingUp} label="平均成功率" value={tm?.avg_success_rate != null ? `${(tm.avg_success_rate * 100).toFixed(1)}%` : '-'} color="bg-purple-100" />
-            <StatCard icon={BarChart3} label="DAG 数量" value={dagS?.total_dags} color="bg-orange-100" />
+            <StatCard icon={CheckCircle2} label="完成" value={ex?.completed || 0} color="bg-green-100" />
+            <StatCard icon={XCircle} label="失败" value={ex?.failed || 0} color="bg-red-100" />
+            <StatCard icon={Cpu} label="进行中" value={ex?.in_progress || 0} color="bg-blue-100" />
+            <StatCard icon={TrendingUp} label="总执行" value={ex?.total || 0} color="bg-purple-100" />
           </div>
-        </section>
+        </div>
 
-        {/* ── Execution Overview ── */}
-        <section>
+        {/* Teammate Stats */}
+        <div>
           <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
-            <Activity size={14} /> 执行概况
+            <Users size={15} className="text-indigo-500" /> 队友画像
           </h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard icon={CheckCircle2} label="已完成" value={ex?.completed} color="bg-green-100" />
-            <StatCard icon={XCircle} label="失败" value={ex?.failed} color="bg-red-100" />
-            <StatCard icon={Loader2} label="运行中" value={ex?.running} color="bg-blue-100" />
-            <StatCard icon={Cpu} label="总 Token" value={ex?.total_tokens?.toLocaleString()} color="bg-indigo-100" />
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <StatCard icon={Users} label="队友数" value={tm?.count || 0} color="bg-indigo-100" />
+            <StatCard icon={Brain} label="记忆条目" value={mem?.total_items || 0} color="bg-amber-100" sub={`${mem?.fragment_types || 0} 种类型`} />
+            <StatCard icon={DollarSign} label="总花费" value={formatCost(tm?.total_cost_μs)} color="bg-emerald-100" />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-            <StatCard icon={DollarSign} label="总成本" value={formatCost(ex?.total_cost_micro_usd)} color="bg-amber-100"
-              sub={ex?.total_executions != null ? `${ex.total_executions} 次执行` : undefined} />
-            <StatCard icon={Activity} label="执行总数" value={ex?.total_executions} color="bg-gray-100"
-              sub={`${ex?.completed || 0} 成功 / ${ex?.failed || 0} 失败`} />
-          </div>
-        </section>
+        </div>
 
-        {/* ── Memory Statistics ── */}
-        <section>
-          <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
-            <Brain size={14} /> 内存统计
-          </h2>
-          <div className="bg-white rounded-xl border border-hairline p-4">
-            <div className="text-lg font-bold text-ink">{mem?.total_items ?? 0}</div>
-            <div className="text-[11px] text-ink-faint mt-0.5">总记忆条目</div>
-            {mem?.by_type && Object.keys(mem.by_type).length > 0 && (
-              <div className="mt-3 space-y-1.5">
-                {Object.entries(mem.by_type).map(([type, count]) => (
-                  <div key={type} className="flex items-center gap-2">
-                    <span className="text-xs text-ink-mute w-24 truncate">{type}</span>
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(count / mem.total_items) * 100}%` }}
-                        className="h-full rounded-full bg-indigo-400"
-                      />
-                    </div>
-                    <span className="text-xs font-mono text-ink-faint">{count}</span>
-                  </div>
-                ))}
+        {/* DAG Stats */}
+        {dagS && (
+          <div>
+            <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
+              <BarChart3 size={15} className="text-indigo-500" /> DAG 执行分布
+            </h2>
+            <div className="bg-white rounded-xl border border-hairline p-4">
+              <div className="text-xs text-ink-faint">
+                <span className="font-medium text-ink">节点:</span> {dagS.total_nodes || 0} · <span className="font-medium text-ink">边:</span> {dagS.total_edges || 0} · <span className="font-medium text-ink">深度:</span> {dagS.max_depth || 0}
               </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Teammate Growth ── */}
-        <section>
-          <h2 className="text-sm font-semibold text-ink mb-3 flex items-center gap-2">
-            <TrendingUp size={14} /> 队友成长
-          </h2>
-          <div className="bg-white rounded-xl border border-hairline divide-y divide-hairline">
-            {(tm?.growth || []).length === 0 ? (
-              <div className="p-4 text-center text-xs text-ink-faint">暂无队友</div>
-            ) : (
-              tm.growth.map((t, i) => (
-                <div key={t.name + i} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="w-2 h-2 rounded-full bg-indigo-400" />
-                  <span className="text-sm text-ink">{t.name}</span>
-                  <span className="text-[10px] text-ink-faint ml-auto">
-                    {t.created_at ? new Date(t.created_at).toLocaleDateString('zh-CN') : '-'}
+              <div className="mt-3 text-[11px] text-ink-faint">
+                {dagS.status_counts ? Object.entries(dagS.status_counts).map(([k, v]) => (
+                  <span key={k} className="mr-4">
+                    <span className="font-medium text-ink capitalize">{k}:</span> {v}
                   </span>
-                </div>
-              ))
-            )}
+                )) : '暂无 DAG 数据'}
+              </div>
+            </div>
           </div>
-        </section>
-
+        )}
       </div>
     </div>
   );

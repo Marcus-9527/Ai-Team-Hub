@@ -563,7 +563,7 @@ export default function TaskDetailView({ taskId, onBack }) {
           <h2 className="text-sm font-bold text-ink truncate">{task.title}</h2>
         </div>
         <span className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${sc.bg} ${sc.color} ml-2`}>
-          {task.status}
+          {t('task.status.' + task.status)}
         </span>
       </div>
 

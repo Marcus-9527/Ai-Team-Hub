@@ -177,7 +177,7 @@ export default function TaskProgressPanel({
               <Users size={14} className="text-ink-faint" />
               <h3 className="text-sm font-bold text-ink">AI 团队</h3>
             </div>
-            <TeamPanel steps={steps} />
+            <TeamPanel steps={steps} taskStatus={task?.status} />
           </div>
         )}
 

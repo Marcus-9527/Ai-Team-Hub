@@ -11,7 +11,7 @@ const STEP_STATUS = {
   SKIPPED:    { color: 'text-gray-400', bg: 'bg-gray-100', icon: XCircle },
 };
 
-export default function TeamPanel({ steps = [] }) {
+export default function TeamPanel({ steps = [], taskStatus = '' }) {
   const [teammates, setTeammates] = useState([]);
   useEffect(() => {
     api.listTeammates().then(setTeammates).catch(() => {});
@@ -35,7 +35,12 @@ export default function TeamPanel({ steps = [] }) {
   }, [steps]);
 
   // Aggregate per-teammate status (most severe first)
+  // ponytail: task-level terminal status overrides per-step aggregation.
+  // When a task is cancelled or completed, the teammate card should not
+  // show "执行中" based on stale step states.
+  const taskTerminal = taskStatus === 'CANCELLED' || taskStatus === 'COMPLETED';
   const tmStatus = useMemo(() => {
+    if (taskTerminal) return {};
     const out = {};
     for (const [tid, ss] of Object.entries(tmSteps)) {
       if (ss.some(s => s.status === 'RUNNING')) out[tid] = 'running';
@@ -45,13 +50,14 @@ export default function TeamPanel({ steps = [] }) {
       else out[tid] = 'waiting';
     }
     return out;
-  }, [tmSteps]);
+  }, [tmSteps, taskTerminal]);
 
   const STATUS_BADGE = {
     running:   'bg-indigo-100 text-indigo-600',
     planning:  'bg-blue-100 text-blue-600',
     completed: 'bg-green-100 text-green-600',
     failed:    'bg-red-100 text-red-600',
+    cancelled: 'bg-gray-100 text-gray-500',
     waiting:   'bg-gray-100 text-gray-500',
   };
 
@@ -65,7 +71,7 @@ export default function TeamPanel({ steps = [] }) {
       <div className="grid gap-2">
         {tmIds.map(tid => {
           const tm = tmMap[tid];
-          const st = tmStatus[tid] || 'waiting';
+          const st = taskTerminal ? taskStatus.toLowerCase() : (tmStatus[tid] || 'waiting');
           const ss = tmSteps[tid];
           const done = ss.filter(s => s.status === 'COMPLETED').length;
           return (
@@ -77,7 +83,7 @@ export default function TeamPanel({ steps = [] }) {
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-sm text-ink truncate">{tm?.name || tid}</span>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${STATUS_BADGE[st]}`}>
-                    {st === 'running' ? '执行中' : st === 'completed' ? '完成' : st === 'failed' ? '失败' : st === 'planning' ? '规划中' : '等待'}
+                    {st === 'running' ? '执行中' : st === 'completed' ? '完成' : st === 'failed' ? '失败' : st === 'cancelled' ? '已取消' : st === 'planning' ? '规划中' : '等待'}
                   </span>
                 </div>
                 <p className="text-[10px] text-ink-faint mt-0.5">{tm?.role || ''} · {tm?.model_provider ? `${tm.model_provider}/${tm.model_name}` : ''}</p>

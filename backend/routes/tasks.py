@@ -27,7 +27,7 @@ Provides:
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 import sqlalchemy as sa
@@ -852,9 +852,9 @@ def _task_to_response(task) -> TaskResponse:
         priority=task.priority,
         intent=task.intent,
         created_by=task.created_by,
-        created_at=task.created_at.isoformat() if task.created_at else None,
-        updated_at=task.updated_at.isoformat() if task.updated_at else None,
-        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        created_at=task.created_at.replace(tzinfo=timezone.utc).isoformat() if task.created_at else None,
+        updated_at=task.updated_at.replace(tzinfo=timezone.utc).isoformat() if task.updated_at else None,
+        completed_at=task.completed_at.replace(tzinfo=timezone.utc).isoformat() if task.completed_at else None,
         steps_count=len(task.steps) if _steps_loaded(task) and task.steps else 0,
         # Phase 4 delivery fields
         review_status=getattr(task, "review_status", "pending") or "pending",
@@ -888,9 +888,9 @@ def _step_to_dict(step) -> dict:
         "maeos_task_id": step.maeos_task_id,
         "error": step.error,
         "retry_count": step.retry_count,
-        "created_at": step.created_at.isoformat() if step.created_at else None,
-        "started_at": step.started_at.isoformat() if step.started_at else None,
-        "completed_at": step.completed_at.isoformat() if step.completed_at else None,
+        "created_at": step.created_at.replace(tzinfo=timezone.utc).isoformat() if step.created_at else None,
+        "started_at": step.started_at.replace(tzinfo=timezone.utc).isoformat() if step.started_at else None,
+        "completed_at": step.completed_at.replace(tzinfo=timezone.utc).isoformat() if step.completed_at else None,
     }
 
 
@@ -1844,6 +1844,8 @@ async def get_task_dag(
 
     dags_stmt = (
         sa.select(DAGDefinitionModel)
+        .where(DAGDefinitionModel.task_id == task_id)
+        .options(sa.orm.selectinload(DAGDefinitionModel.nodes))
         .order_by(DAGDefinitionModel.created_at.desc())
         .limit(1)
     )
@@ -1854,7 +1856,7 @@ async def get_task_dag(
 
     return {
         "dag": dag.to_dict(),
-        "nodes": [n.to_dict() for n in (dag.nodes or [])],
+        "nodes": [n.to_dict() for n in dag.nodes],
     }
 
 

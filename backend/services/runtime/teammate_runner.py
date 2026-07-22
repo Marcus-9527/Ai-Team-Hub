@@ -14,33 +14,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
-from backend.services.ai_service import stream_ai_response
 from backend.cache import teammate_cache, apikey_cache
 from backend.services.brain.chat_memory import extract_and_store
 from backend.database import async_session
 from sqlalchemy import select
 from backend.models import APIKey
-from backend.crypto import decrypt_value
+from backend.security.crypto import decrypt_value
 
 logger = logging.getLogger("runtime.teammate_runner")
-
-
-_CHAT_TOOL_INSTRUCTIONS = """\
-## Tool Access
-You can use tools to read/write files, run shell commands, and execute code.
-To use a tool, include one or more fenced blocks in your response:
-<TOOL>
-{"tool": "file_read", "args": {"path": "src/main.py"}}
-</TOOL>
-
-Available tools:
-- file_read(path): read a file
-- file_write(path, content): write/overwrite a file
-- shell_exec(command): run shell commands (pytest, git, npm)
-- code_exec(code, language="python"): run arbitrary code (python3/node/bash; 30s timeout)
-
-Once the tools complete their work, reply with a plain-text summary (no <TOOL> blocks).
-"""
 
 
 # ── Role Detection ──
@@ -156,14 +137,11 @@ def build_turn_prompt(
     if shared_attachment_context:
         attachment_section = _build_attachment_section(shared_attachment_context, role)
 
-    tools_section = _CHAT_TOOL_INSTRUCTIONS if role in ("engineer", "techlead", "engineer_lead") else ""
-
     return f"""{system_prompt}
 
 {axis}
 
 {attachment_section}
-{tools_section}
 ## Question from user:
 {user_message}
 
@@ -315,16 +293,52 @@ async def resolve_api_key(teammate: dict) -> tuple[Optional[str], Optional[str],
     return None, None, None, None
 
 
-async def _workspace_active_key(workspace_id: str | None = None) -> Optional[tuple]:
-    """Return (id, base_url, provider) for the active workspace key, or None.
+async def resolve_workspace_api_key(workspace_id: str | None = None, db_session=None) -> Optional[tuple]:
+    """Return (api_key, base_url, provider) for the workspace's active key, or None.
 
     Scoped to workspace_id when given; otherwise matches workspace-less keys
-    (legacy/global fallback).
+    (legacy/global fallback).  Queries + decrypts in one call —
+    the single point of truth for workspace-scoped key resolution.
+
+    Accepts an optional existing DB session to avoid deadlocks.
+    If none given, opens a new one.
+    """
+    from backend.security.crypto import decrypt_value
+
+    if db_session is not None:
+        return await _resolve_ws_key_raw(db_session, workspace_id)
+
+    async with async_session() as sess:
+        return await _resolve_ws_key_raw(sess, workspace_id)
+
+
+async def _resolve_ws_key_raw(sess, workspace_id: str | None = None) -> Optional[tuple]:
+    """Internal: full query + decrypt, caller must provide a session."""
+    from backend.security.crypto import decrypt_value
+
+    for cond in (
+        APIKey.workspace_id == (workspace_id or None),
+        APIKey.workspace_id.isnot(None),
+        APIKey.workspace_id.is_(None),
+    ):
+        result = await sess.execute(
+            select(APIKey).where(APIKey.is_active == "1", cond).limit(1)
+        )
+        k = result.scalar_one_or_none()
+        if k:
+            plain = decrypt_value(k.api_key)
+            if plain:
+                return plain, (k.base_url or ""), k.provider
+    return None
+
+
+async def _workspace_active_key(workspace_id: str | None = None) -> Optional[tuple]:
+    """DEPRECATED — use resolve_workspace_api_key().  Kept for backward compat.
+
+    Return (id, base_url, provider) for the active workspace key, or None.
+    Does NOT decrypt the key — callers should migrate to resolve_workspace_api_key().
     """
     async with async_session() as sess:
-        # ponytail: strict ws match, then any active key. teammates often
-        # have null workspace_id while keys carry a ws id, so a configured
-        # key must still resolve (mirrors messages.py _fallback_key_ref).
         for cond in (
             APIKey.workspace_id == (workspace_id or None),
             APIKey.workspace_id.isnot(None),
@@ -363,21 +377,36 @@ async def call_teammate(
     from backend.services.brain.brain_loader import get_brain_loader
     brain_prompt = await get_brain_loader().build_prompt(
         teammate.get("id", ""), query=user_message,
+        workspace_id=teammate.get("workspace_id", ""),
     )
 
     prompt = build_turn_prompt(teammate, user_message, history_texts, turn_number, shared_attachment_context, brain_prompt=brain_prompt)
 
+    from backend.services.runtime.agent_loop import AgentLoop as _AgentLoop
+    from backend.services.runtime.llm_client_and_tools import (
+        create_streaming_llm_client as _create_streaming, ToolExecutorAdapter as _ToolExec,
+    )
+
     chunks = []
+    async def _collect_chunk(text: str):
+        chunks.append(text)
+
     try:
-        async for chunk in stream_ai_response(
+        streaming_client = _create_streaming(
+            api_key=api_key_val, model=model_name,
+            provider=key_provider or teammate.get("model_provider", "openrouter"),
+            base_url=base_url_val or "",
+            max_tokens=1024,
+        )
+        loop = _AgentLoop(llm_client=streaming_client, tool_executor=_ToolExec(), max_turns=1)
+        await loop.run(
             system_prompt=prompt,
             messages=[{"role": "user", "content": user_message}],
-            provider=key_provider or teammate.get("model_provider", "openrouter"),
-            model=model_name,
-            api_key=api_key_val,
-            base_url=base_url_val or None,
-        ):
-            chunks.append(chunk)
+            tools=[],
+            workspace_id=teammate.get("workspace_id", ""),
+            subject=detect_role(teammate),
+            on_text_chunk=_collect_chunk,
+        )
     except Exception as e:
         logger.warning(f"Teammate {teammate.get('name', '?')} failed: {e}")
         return None
@@ -394,15 +423,23 @@ The user asked: {user_message}
 Give YOUR personal perspective in 2-3 sentences. Do NOT say "no new info" — just give your opinion, even if the question is generic."""
         try:
             retry_chunks = []
-            async for chunk in stream_ai_response(
+            async def _retry_chunk(text: str):
+                retry_chunks.append(text)
+            sc = _create_streaming(
+                api_key=api_key_val, model=model_name,
+                provider=teammate.get("model_provider", "openrouter"),
+                base_url=base_url_val or "",
+                max_tokens=1024,
+            )
+            loop = _AgentLoop(llm_client=sc, tool_executor=_ToolExec(), max_turns=1)
+            await loop.run(
                 system_prompt=retry_prompt,
                 messages=[{"role": "user", "content": user_message}],
-                provider=teammate.get("model_provider", "openrouter"),
-                model=model_name,
-                api_key=api_key_val,
-                base_url=base_url_val or None,
-            ):
-                retry_chunks.append(chunk)
+                tools=[],
+                workspace_id=teammate.get("workspace_id", ""),
+                subject=teammate.get("role", ""),
+                on_text_chunk=_retry_chunk,
+            )
             retry_text = "".join(retry_chunks).strip()
             if retry_text and retry_text != "[NO_NEW_INFO]" and not retry_text.endswith("[NO_NEW_INFO]"):
                 full_text = retry_text
@@ -501,6 +538,7 @@ async def stream_teammate(
     from backend.services.brain.brain_loader import get_brain_loader
     brain_prompt = await get_brain_loader().build_prompt(
         teammate.get("id", ""), query=user_message,
+        workspace_id=teammate.get("workspace_id", ""),
     )
     # 聊天记忆注入：best-effort，失败跳过（不阻塞对话）
     try:
@@ -515,76 +553,191 @@ async def stream_teammate(
         logger.warning("[ChatMemory] injection skipped (msg still flows): %s", e)
     prompt = build_turn_prompt(teammate, user_message, history_texts, turn_idx, shared_attachment_context, brain_prompt=brain_prompt)
 
-    early_buffer = ""
-    early_done = False
+    ENGINEER_ROLES = {"engineer", "techlead", "engineer_lead"}
     full_text = ""
-    buffered_chunks: list[str] = []
+    role_is_engineer = role in ENGINEER_ROLES
 
-    try:
-        async for chunk in stream_ai_response(
-            system_prompt=prompt,
-            messages=[{"role": "user", "content": user_message}],
-            provider=resolved_provider or teammate.get("model_provider", "openrouter"),
-            model=model_name,
-            api_key=api_key_val,
-            base_url=base_url_val or None,
-        ):
-            full_text += chunk
-            if not early_done:
-                early_buffer += chunk
-                buffered_chunks.append(chunk)
-                if len(early_buffer) >= 60 or "\n" in early_buffer:
-                    if early_buffer.lstrip().startswith("[NO_NEW_INFO]"):
-                        early_done = True
-                        continue
-                    early_done = True
-                    for c in buffered_chunks:
-                        yield _emit_event(
-                            event_type="teammate_message",
-                            message_id=message_id,
-                            role=role,
-                            phase=phase,
-                            payload={"content": c, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
-                        )
-                    buffered_chunks = []
-                    continue
-            else:
+    if role_is_engineer:
+        # ── AgentLoop + Queue bridge 路径（工具角色）──
+        import asyncio
+        from backend.services.runtime.agent_loop import AgentLoop
+        from backend.services.runtime.llm_client_and_tools import (
+            create_llm_client, ToolExecutorAdapter,
+        )
+        from backend.services.organization.capability import CapabilityRegistry
+
+        queue: asyncio.Queue = asyncio.Queue()
+        _SENTINEL = object()
+
+        async def _emit_text(text: str):
+            queue.put_nowait(("text", text))
+
+        async def _emit_tool(tc, tr):
+            queue.put_nowait(("tool", tc, tr))
+
+        async def _run_loop_background():
+            try:
+                llm_client = create_llm_client(
+                    api_key=api_key_val, model=model_name,
+                    provider=resolved_provider or teammate.get("model_provider", "openrouter"),
+                    base_url=base_url_val or "",
+                )
+                executor = ToolExecutorAdapter()
+                loop = AgentLoop(llm_client=llm_client, tool_executor=executor, max_turns=6)
+                engineer_tools = CapabilityRegistry().resolve_tools(role)
+                result = await loop.run(
+                    system_prompt=prompt,
+                    messages=[{"role": "user", "content": user_message}],
+                    tools=engineer_tools,
+                    workspace_id=teammate.get("workspace_id", ""),
+                    subject=role,
+                    on_text_chunk=_emit_text,
+                    on_tool_call=_emit_tool,
+                )
+                queue.put_nowait(_SENTINEL)
+                return result
+            except (Exception, asyncio.CancelledError) as e:
+                logger.exception("[AgentLoop] background task failed")
+                queue.put_nowait(("error", str(e)))
+                queue.put_nowait(_SENTINEL)
+
+        task = asyncio.create_task(_run_loop_background())
+
+        # task.add_done_callback 保险：即使任务崩在 try 块之前（创建 client/AgentLoop 时），
+        # 也确保 sentinel 不会缺失 → 外层 while 不会死锁
+        def _on_task_done(t: asyncio.Task):
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                queue.put_nowait(("error", str(exc)))
+                queue.put_nowait(_SENTINEL)
+        task.add_done_callback(_on_task_done)
+
+        while True:
+            item = await queue.get()
+            if item is _SENTINEL:
+                break
+            kind = item[0]
+            if kind == "text":
+                content = item[1]
+                full_text += content
                 yield _emit_event(
                     event_type="teammate_message",
-                    message_id=message_id,
-                    role=role,
-                    phase=phase,
-                    payload={"content": chunk, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+                    message_id=message_id, role=role, phase=phase,
+                    payload={"content": content, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
                 )
-    except Exception as e:
-        logger.warning(f"Teammate {teammate.get('name', '?')} ({role}) stream failed: {e}")
-        for ev in _emit_placeholder_then_error(
+            elif kind == "tool":
+                tc, tr = item[1], item[2]
+                yield _emit_event(
+                    event_type="tool_call",
+                    message_id=message_id, role=role, phase=phase,
+                    payload={"name": tc.name, "arguments": tc.arguments, "status": "ok" if not tr.is_error else "error"},
+                )
+            elif kind == "error":
+                for ev in _emit_placeholder_then_error(
+                    message_id=message_id, role=role, phase=phase,
+                    teammate=teammate, err=item[1],
+                ):
+                    yield ev
+                return
+
+        full_text = full_text.strip()
+        yield _emit_event(
+            event_type="teammate_end",
             message_id=message_id, role=role, phase=phase,
-            teammate=teammate, err=str(e),
-        ):
-            yield ev
+            payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+        )
+        extract_and_store(teammate, user_message, full_text, channel_id)
         return
 
-    full_text = full_text.strip()
+    # ── 非工具角色（analyst / designer / pm / …）── AgentLoop + StreamingLLMClient
+    import asyncio
+    from backend.services.runtime.agent_loop import AgentLoop as _AgentLoop
+    from backend.services.runtime.llm_client_and_tools import (
+        create_streaming_llm_client as _create_streaming, ToolExecutorAdapter as _ToolExec,
+    )
 
-    # Ponytail: flush any remaining buffered chunks (short responses < ~60 chars
-    # with no newline never hit the aggressive flush above). After emitting,
-    # mark early_done so teammate_end fires.
+    queue: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+    early_buffer = ""
+    early_done = False
+    buffered_chunks: list[str] = []
+    _detected_no_new_info = False
+
+    async def _on_text(text: str):
+        nonlocal early_buffer, early_done, buffered_chunks, _detected_no_new_info, full_text
+        full_text += text
+        if not early_done:
+            early_buffer += text
+            buffered_chunks.append(text)
+            if len(early_buffer) >= 60 or "\n" in early_buffer:
+                if early_buffer.lstrip().startswith("[NO_NEW_INFO]"):
+                    early_done = True
+                    _detected_no_new_info = True
+                    return
+                early_done = True
+                for c in buffered_chunks:
+                    queue.put_nowait(c)
+                buffered_chunks = []
+        else:
+            queue.put_nowait(text)
+
+    async def _run_bg():
+        try:
+            streaming_client = _create_streaming(
+                api_key=api_key_val, model=model_name,
+                provider=resolved_provider or teammate.get("model_provider", "openrouter"),
+                base_url=base_url_val or "",
+                max_tokens=1024,
+            )
+            loop = _AgentLoop(llm_client=streaming_client, tool_executor=_ToolExec(), max_turns=1)
+            await loop.run(
+                system_prompt=prompt,
+                messages=[{"role": "user", "content": user_message}],
+                tools=[],
+                workspace_id=teammate.get("workspace_id", ""),
+                subject=role,
+                on_text_chunk=_on_text,
+            )
+            queue.put_nowait(_SENTINEL)
+        except Exception as e:
+            logger.exception("[AgentLoop] background task failed")
+            queue.put_nowait(("error", str(e)))
+            queue.put_nowait(_SENTINEL)
+
+    # Flush remaining buffered chunks before reading from queue
     if buffered_chunks and not early_done:
         for c in buffered_chunks:
-            yield _emit_event(
-                event_type="teammate_message",
-                message_id=message_id,
-                role=role,
-                phase=phase,
-                payload={"content": c, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
-            )
+            queue.put_nowait(c)
         buffered_chunks = []
         early_done = True
 
-    already_streamed = early_done and not buffered_chunks
+    bg_task = asyncio.create_task(_run_bg())
 
-    if not already_streamed and (full_text == "[NO_NEW_INFO]" or full_text.endswith("[NO_NEW_INFO]")):
+    while True:
+        item = await queue.get()
+        if item is _SENTINEL:
+            break
+        if isinstance(item, str):
+            yield _emit_event(
+                event_type="teammate_message",
+                message_id=message_id, role=role, phase=phase,
+                payload={"content": item, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+            )
+            continue
+        if isinstance(item, tuple) and item[0] == "error":
+            for ev in _emit_placeholder_then_error(
+                message_id=message_id, role=role, phase=phase,
+                teammate=teammate, err=item[1],
+            ):
+                yield ev
+            return
+
+    full_text = full_text.strip()
+
+    # ── [NO_NEW_INFO] retry ──
+    if _detected_no_new_info and (full_text == "[NO_NEW_INFO]" or full_text.endswith("[NO_NEW_INFO]")):
         logger.info(f"Teammate {teammate.get('name', '?')} signaled NO_NEW_INFO, retrying...")
         retry_prompt = f"""{teammate.get('system_prompt', 'You are a helpful team member.')}
 
@@ -593,49 +746,74 @@ The user asked: {user_message}
 Give YOUR personal perspective in 2-3 sentences. Do NOT say "no new info" — just give your opinion, even if the question is generic."""
         try:
             retry_full = ""
-            async for chunk in stream_ai_response(
-                system_prompt=retry_prompt,
-                messages=[{"role": "user", "content": user_message}],
-                provider=teammate.get("model_provider", "openrouter"),
-                model=model_name,
-                api_key=api_key_val,
-                base_url=base_url_val or None,
-            ):
-                retry_full += chunk
-                yield _emit_event(
-                    event_type="teammate_message",
-                    message_id=message_id,
-                    role=role,
-                    phase=phase,
-                    payload={"content": chunk, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
-                )
+            queue2: asyncio.Queue = asyncio.Queue()
+
+            async def _retry_chunk(text: str):
+                nonlocal retry_full
+                retry_full += text
+                queue2.put_nowait(text)
+
+            async def _retry_bg():
+                try:
+                    sc = _create_streaming(
+                        api_key=api_key_val, model=model_name,
+                        provider=teammate.get("model_provider", "openrouter"),
+                        base_url=base_url_val or "",
+                        max_tokens=1024,
+                    )
+                    loop = _AgentLoop(llm_client=sc, tool_executor=_ToolExec(), max_turns=1)
+                    await loop.run(
+                        system_prompt=retry_prompt,
+                        messages=[{"role": "user", "content": user_message}],
+                        tools=[],
+                        workspace_id=teammate.get("workspace_id", ""),
+                        subject=role,
+                        on_text_chunk=_retry_chunk,
+                    )
+                    queue2.put_nowait(_SENTINEL)
+                except Exception as e:
+                    logger.exception("[AgentLoop] retry background task failed")
+                    queue2.put_nowait(("error", str(e)))
+                    queue2.put_nowait(_SENTINEL)
+
+            asyncio.create_task(_retry_bg())
+            while True:
+                item2 = await queue2.get()
+                if item2 is _SENTINEL:
+                    break
+                if isinstance(item2, str):
+                    yield _emit_event(
+                        event_type="teammate_message",
+                        message_id=message_id, role=role, phase=phase,
+                        payload={"content": item2, "author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+                    )
+                    continue
+                if isinstance(item2, tuple) and item2[0] == "error":
+                    yield _emit_event(
+                        event_type="error",
+                        message_id=message_id, role=role, phase=phase,
+                        payload={"content": f"Teammate {teammate.get('name', '?')} retry failed: {item2[1]}"},
+                    )
+                    return
+
             yield _emit_event(
                 event_type="teammate_end",
-                message_id=message_id,
-                role=role,
-                phase=phase,
+                message_id=message_id, role=role, phase=phase,
                 payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
             )
-            # 聊天记忆：best-effort 异步提炼，不阻塞主流程
             extract_and_store(teammate, user_message, retry_full.strip(), channel_id)
         except Exception as e:
             logger.warning(f"Teammate {teammate.get('name', '?')} retry failed: {e}")
             yield _emit_event(
                 event_type="error",
-                message_id=message_id,
-                role=role,
-                phase=phase,
+                message_id=message_id, role=role, phase=phase,
                 payload={"content": f"Teammate {teammate.get('name', '?')} retry failed: {e}"},
             )
         return
 
-    if already_streamed:
-        yield _emit_event(
-            event_type="teammate_end",
-            message_id=message_id,
-            role=role,
-            phase=phase,
-            payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
-        )
-        # 聊天记忆：best-effort 异步提炼，不阻塞主流程
-        extract_and_store(teammate, user_message, full_text, channel_id)
+    yield _emit_event(
+        event_type="teammate_end",
+        message_id=message_id, role=role, phase=phase,
+        payload={"author_name": teammate.get("name", ""), "teammate_id": teammate.get("id", "")},
+    )
+    extract_and_store(teammate, user_message, full_text, channel_id)

@@ -146,7 +146,7 @@ async def test_claim_winner_executes_once(db_session):
         "model_provider": "openrouter", "model_name": "openrouter/auto",
         "api_key_ref": None, "system_prompt": "x",
     }
-    with patch("backend.services.pipeline.stream_ai_response",
+    with patch("backend.services.ai_service.stream_ai_response",
                new=lambda *a, **k: _fake_stream()), \
          patch("backend.services.runtime.executor._load_teammate",
                new=AsyncMock(return_value=tm_dict)), \

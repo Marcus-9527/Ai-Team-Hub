@@ -12,7 +12,6 @@ import json
 import re
 from typing import Optional
 
-from backend.services.ai_service import stream_ai_response
 from backend.services.runtime.teammate_runner import resolve_api_key
 from backend.services.runtime.tool_runtime import (
     execute_tool,
@@ -70,19 +69,31 @@ async def run_reviewer_workflow(
         f"TEST OUTPUT:\n{test_text}"
     )
 
-    chunks = []
-    async for c in stream_ai_response(
+    text = ""
+    async def _collect(c: str):
+        nonlocal text
+        text += c
+
+    from backend.services.runtime.agent_loop import AgentLoop as _AgentLoop
+    from backend.services.runtime.llm_client_and_tools import (
+        create_streaming_llm_client as _create_streaming, ToolExecutorAdapter as _ToolExec,
+    )
+    streaming_client = _create_streaming(
+        api_key=api_key, model=model,
+        provider=provider, base_url=base_url or "",
+        max_tokens=1024,
+    )
+    loop = _AgentLoop(llm_client=streaming_client, tool_executor=_ToolExec(), max_turns=1)
+    await loop.run(
         system_prompt=(teammate.get("system_prompt", "") + "\n\n" + REVIEW_PROMPT),
         messages=[{"role": "user", "content": user_msg}],
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        base_url=base_url or None,
-        max_tokens=1024,
-    ):
-        chunks.append(c)
+        tools=[],
+        workspace_id=workspace_id,
+        subject="reviewer",
+        on_text_chunk=_collect,
+    )
 
-    text = "".join(chunks).strip()
+    text = text.strip()
     verdict = "reject"
     summary = text
     blockers: list[str] = []

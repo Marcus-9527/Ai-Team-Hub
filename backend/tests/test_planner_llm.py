@@ -22,7 +22,7 @@ from backend.services.task.task_planner_schema import (
     TaskStepProposal,
 )
 from backend.services.planner.task_analyzer import TaskAnalyzer, TaskAnalysis
-from backend.services.planner.dag_builder import DAGBuilder
+from backend.services.dag.builder import DAGBuilder
 from backend.services.planner.dag_validator import DAGValidator, ValidationResult
 from backend.services.planner.planning_engine import (
     PlanningEngine,

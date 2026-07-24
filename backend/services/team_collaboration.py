@@ -5,11 +5,9 @@ Architecture:
   Round 1: teammates speak in fixed order
 
 Flow:
-  messages.py → generate_team_response()
+  messages.py → OrganizationRuntime.handle_input()
                   → TeammateRunner.stream_teammate() per teammate
-                  → stream_ai_response() (via TeammateRunner)
-
-No direct ai_service calls — all execution goes through TeammateRunner.
+                  → AgentLoop → LLM
 """
 import logging
 from typing import AsyncGenerator, Optional

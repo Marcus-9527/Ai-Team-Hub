@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from backend.services.memory.memory_types import MemoryItem
-from backend.services.memory.memory_ranker import RankedItem
+from backend.services.memory.memory_retriever import RankedItem
 
 logger = logging.getLogger("memory.compressor")
 

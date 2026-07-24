@@ -233,8 +233,6 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
 
             # Create a task for this check-in run
             from backend.services.task.task_manager import TaskManager
-            from backend.services.task.task_orchestrator import TaskOrchestrator
-            from backend.services.runtime.executor import ExecutionRuntime
 
             title = f"[Auto] {job.name}"
             description = job.goal[:500] if job.goal else job.name
@@ -248,17 +246,16 @@ async def _execute_job(job: AutomationJobModel, run: AutomationRunModel):
             )
             await db.commit()
 
-            # Run through orchestrator
-            # ponytail: a fresh ExecutionRuntime has NO dispatch loop/workers
-            # until start() is called — without it, submit() enqueues the task
-            # but wait() blocks forever (silent hang, HTTP 200, no AI call).
-            runtime = ExecutionRuntime(max_workers=4)
-            await runtime.start()
-            orch = TaskOrchestrator(runtime=runtime)
-            # Hard ceiling: a task that can't finish in AUTOMATION_RUN_TIMEOUT_SEC
-            # is hung (e.g. stuck LLM call) — fail it instead of stalling forever.
+            # Run through OrganizationRuntime → OrganizationLoop → TaskOrchestrator
+            from backend.services.organization.runtime import OrganizationRuntime
+            rt = OrganizationRuntime(db)
             await asyncio.wait_for(
-                orch.start_task(db, task.id, job.goal or job.name),
+                rt.run_task(
+                    task_id=task.id,
+                    goal=job.goal or job.name,
+                    channel_id="",
+                    workspace_id=ws_id or "",
+                ),
                 timeout=AUTOMATION_RUN_TIMEOUT_SEC,
             )
 

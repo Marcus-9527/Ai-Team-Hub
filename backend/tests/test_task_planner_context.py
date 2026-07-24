@@ -298,57 +298,6 @@ class TestBuilderTaskHistory:
 # ═══════════════════════════════════════════════════════════════
 # 5. PlannerContextBuilder — with workspace memory
 # ═══════════════════════════════════════════════════════════════
-
-class TestBuilderWorkspaceMemory:
-    @pytest.mark.asyncio
-    async def test_workspace_memory_available(self, fake_task):
-        """Workspace memory is collected when available."""
-        db = _make_db()
-
-        fake_entry = MagicMock()
-        fake_entry.memory_type = "decision"
-        fake_entry.actor = "system"
-        fake_entry.content = "Use async/await for all I/O"
-
-        with patch(
-            "backend.services.workspace_memory.WorkspaceMemory"
-        ) as MockWM:
-            fake_wm = MockWM.return_value
-            fake_wm.get_all.return_value = [fake_entry]
-
-            builder = PlannerContextBuilder()
-            ctx = await builder.build(db, fake_task)
-
-            assert "Use async/await" in ctx.workspace_context
-            assert "workspace" in ctx.sources
-
-    @pytest.mark.asyncio
-    async def test_workspace_memory_unavailable(self, fake_task_no_extra):
-        """No workspace context when task has no workspace_id."""
-        db = _make_db()
-
-        builder = PlannerContextBuilder()
-        ctx = await builder.build(db, fake_task_no_extra)
-
-        assert ctx.workspace_context == ""
-
-    @pytest.mark.asyncio
-    async def test_workspace_memory_fallback_graceful(self, fake_task):
-        """Graceful fallback when workspace memory errors."""
-        db = _make_db()
-
-        with patch(
-            "backend.services.workspace_memory.WorkspaceMemory",
-            side_effect=ImportError("No workspace module"),
-        ):
-            builder = PlannerContextBuilder()
-            ctx = await builder.build(db, fake_task)
-
-            assert ctx.workspace_context == ""
-            assert "workspace" not in ctx.sources
-
-
-# ═══════════════════════════════════════════════════════════════
 # 6. PlannerContextBuilder — with global rules
 # ═══════════════════════════════════════════════════════════════
 
@@ -488,33 +437,23 @@ class TestBuilderAllSources:
             ]),  # files
         ])
 
-        with patch(
-            "backend.services.workspace_memory.WorkspaceMemory"
-        ) as MockWM:
-            fake_entry = MagicMock()
-            fake_entry.memory_type = "decision"
-            fake_entry.actor = "system"
-            fake_entry.content = "Use JWT"
-            fake_wm = MockWM.return_value
-            fake_wm.get_all.return_value = [fake_entry]
+        builder = PlannerContextBuilder()
+        ctx = await builder.build(
+            db, fake_task,
+            global_rules=["Use async/await"],
+        )
 
-            builder = PlannerContextBuilder()
-            ctx = await builder.build(
-                db, fake_task,
-                global_rules=["Use async/await"],
-            )
+        assert fake_task.title in ctx.task_context
+        assert "Research" in ctx.memory_context
+        assert "Need auth" in ctx.channel_context
+        assert ctx.workspace_context == ""
+        assert "Use async/await" in ctx.global_context
+        assert "auth.py" in ctx.file_context
 
-            assert fake_task.title in ctx.task_context
-            assert "Research" in ctx.memory_context
-            assert "Need auth" in ctx.channel_context
-            assert "Use JWT" in ctx.workspace_context
-            assert "Use async/await" in ctx.global_context
-            assert "auth.py" in ctx.file_context
-
-            # All sources recorded
-            assert len(ctx.sources) == 6
-            for src in ["task", "history", "channel", "workspace", "global", "files"]:
-                assert src in ctx.sources
+        # All sources recorded (workspace removed)
+        assert len(ctx.sources) == 5
+        for src in ["task", "history", "channel", "global", "files"]:
+            assert src in ctx.sources
 
 
 # ═══════════════════════════════════════════════════════════════

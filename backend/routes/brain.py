@@ -13,7 +13,6 @@ from fastapi import APIRouter, Query, Depends, Request
 from backend.middleware.auth import require_admin, ws_id_of
 
 from backend.services.memory.memory_service import get_memory_service
-from backend.services.memory.memory_intelligence import get_intelligence_service
 from backend.services.evaluation import EvaluationService
 from backend.database import async_session
 from backend.services.brain.fragment_store import (
@@ -35,22 +34,19 @@ router = APIRouter(prefix="/api/brain", tags=["brain"])
 
 @router.get("")
 async def brain_overview(request: Request):
-    """Aggregate memory stats, recent insights, evaluation summary."""
+    """Aggregate memory stats, evaluation summary."""
     ws = ws_id_of(request)
     svc = get_memory_service()
-    intel = get_intelligence_service()
     eval_svc = EvaluationService()
 
     memory_counts = await svc.stats(workspace_id=ws)
 
     async with async_session() as db:
-        insights = await intel.list_insights(limit=20, workspace_id=ws)
         eval_stats = await eval_svc.stats(db)
         recent_evaluations = await eval_svc.list_evaluations(db, limit=10)
 
     return {
         "memory_counts": memory_counts,
-        "recent_insights": [i.to_dict() for i in insights],
         "evaluation_stats": eval_stats,
         "recent_evaluations": recent_evaluations,
     }
@@ -81,21 +77,10 @@ async def brain_search(request: Request, q: str = Query("", description="Search 
     return {"items": [it.to_dict() for it in items], "count": len(items)}
 
 
-@router.post("/reflect", dependencies=[Depends(require_admin)])
-async def brain_reflect(task_id: str = ""):
-    """Trigger insight generation for a task. Fire-and-forget."""
-    intel = get_intelligence_service()
-
-    async def _run():
-        try:
-            async with async_session() as db:
-                await intel.process_task_completion(db, task_id)
-                await db.commit()
-        except Exception as e:
-            logger.warning("[BRAIN] reflection failed for %s: %s", task_id, e)
-
-    asyncio.ensure_future(_run())
-    return {"status": "reflection_triggered", "task_id": task_id}
+@router.get("/fragment-types")
+async def list_fragment_types():
+    """List available brain fragment types."""
+    return {"types": [e.value for e in BrainFragmentType]}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -184,12 +169,6 @@ async def brain_loader_prompt(
         teammate_id, recent_memory_limit=recent_memory_limit, extra_context=extra_context,
     )
     return {"teammate_id": teammate_id, "prompt": prompt}
-
-
-@router.get("/fragment-types")
-async def list_fragment_types():
-    """List available brain fragment types."""
-    return {"types": [e.value for e in BrainFragmentType]}
 
 
 @router.post("/consolidate", dependencies=[Depends(require_admin)])

@@ -193,12 +193,11 @@ class PlannerContextBuilder:
         plan = await generate_plan(maeos, goal, context=context.to_dict())
     """
 
-    def __init__(self, max_tokens: int = MAX_CONTEXT_TOKENS, enable_intelligence: bool = True, enable_insights: bool = True):
+    def __init__(self, max_tokens: int = MAX_CONTEXT_TOKENS, enable_intelligence: bool = True):
         self.max_tokens = max_tokens
         self.max_chars = max_tokens * 4  # rough conversion
         self._enable_intelligence = enable_intelligence
-        self._enable_insights = enable_insights
-        logger.debug(f"PlannerContextBuilder initialized, max_chars={self.max_chars}, intelligence={enable_intelligence}, insights={enable_insights}")
+        logger.debug(f"PlannerContextBuilder initialized, max_chars={self.max_chars}, intelligence={enable_intelligence}")
 
     async def build(
         self,
@@ -261,29 +260,8 @@ class PlannerContextBuilder:
                 sources.append("intelligence")
             logger.debug(f"Intelligence context: {len(intelligence_context)} chars")
 
-        # 3c. V2.7 Phase C: Memory Insights (from execution history analysis)
-        insights_context = ""
-        if self._enable_insights and task.id:
-            insights_context = await self._collect_insights(task_id=task.id)
-            if insights_context:
-                sources.append("insights")
-            logger.debug(f"Insights context: {len(insights_context)} chars")
-
-        # Combine intelligence + insights into the same section
-        combined_intelligence = self._merge_intelligence_insights(
-            intelligence_context, insights_context
-        )
-        if combined_intelligence:
-            if "intelligence" not in sources:
-                sources.append("intelligence")
-
-        # 4. Workspace memory
+        # 4. Workspace memory (removed — backend.services.collaboration deleted)
         workspace_context = ""
-        if wid:
-            workspace_context = await self._collect_workspace_memory(wid)
-            if workspace_context:
-                sources.append("workspace")
-            logger.debug(f"Workspace context: {len(workspace_context)} chars")
 
         # 5. Global rules
         global_context = self._build_global_context(global_rules)
@@ -304,7 +282,7 @@ class PlannerContextBuilder:
             task_context=task_context,
             memory_context=memory_context,
             channel_context=channel_context,
-            intelligence_context=combined_intelligence,
+            intelligence_context=intelligence_context,
             workspace_context=workspace_context,
             global_context=global_context,
             file_context=file_context,
@@ -402,58 +380,6 @@ class PlannerContextBuilder:
         text = "\n".join(lines)
         return _truncate(text, MAX_CHANNEL_CHARS, "channel messages")
 
-    async def _collect_workspace_memory(
-        self,
-        workspace_id: str,
-    ) -> str:
-        """
-        Collect workspace memory for context.
-
-        Uses WorkspaceMemory from existing infrastructure.
-        Falls back gracefully if workspace does not exist.
-        """
-        try:
-            # Try to get workspace memory entries
-            from backend.services.workspace_memory import WorkspaceMemory
-            from backend.services.collaboration.shared_context import (
-                get_context_store,
-            )
-
-            shared_ctx = get_context_store().get_or_create(workspace_id)
-            mem = WorkspaceMemory(workspace_id, shared_context=shared_ctx)
-
-            entries = mem.get_all()
-            if not entries:
-                return ""
-
-            # Sort by priority: decisions > revisions > reasoning > conversation
-            type_order = {
-                "decision": 0,
-                "revision": 1,
-                "reasoning": 2,
-                "conversation": 3,
-                "context": 4,
-                "interruption": 5,
-            }
-            entries.sort(key=lambda e: type_order.get(e.memory_type, 99))
-
-            lines = []
-            # Collect up to 15 entries
-            for entry in entries[:15]:
-                type_tag = entry.memory_type.upper()
-                content = (entry.content or "")[:500]
-                lines.append(f"[{type_tag}] {entry.actor}: {content}")
-
-            text = "\n".join(lines)
-            if not text.strip():
-                return ""
-
-            return _truncate(text, MAX_WORKSPACE_CHARS, "workspace memory")
-
-        except Exception as e:
-            logger.debug(f"Workspace memory unavailable: {e}")
-            return ""
-
     # ── V3.1 Memory Intelligence Layer ──────────────────
 
     async def _collect_intelligence(
@@ -538,66 +464,8 @@ class PlannerContextBuilder:
             logger.debug(f"Memory intelligence unavailable: {e}")
             return ""
 
-    # ── V2.7 Phase C: Memory Insights ─────────────────────
 
-    async def _collect_insights(
-        self,
-        task_id: str,
-    ) -> str:
-        """
-        Collect MemoryInsights for a task and format for Planner context.
-
-        Uses MemoryIntelligenceService to fetch insights for this task.
-        Returns a compact, token-efficient text block.
-        """
-        try:
-            from backend.services.memory.memory_intelligence import (
-                get_intelligence_service,
-            )
-
-            svc = get_intelligence_service()
-            insights = await svc.list_insights(task_id=task_id, limit=20)
-
-            if not insights:
-                return ""
-
-            lines: list[str] = []
-            for ins in insights:
-                line = f"[{ins.type}] {ins.title}: {ins.content[:200]}"
-                lines.append(line)
-
-            if not lines:
-                return ""
-
-            text = "\n".join(lines)
-            truncated = _truncate(text, MAX_INTELLIGENCE_CHARS, "insights")
-            return f"[INSIGHTS from previous executions ({len(insights)} items)]\n{truncated}"
-
-        except ImportError as e:
-            logger.debug(f"Insights unavailable (import): {e}")
-            return ""
-        except Exception as e:
-            logger.debug(f"Insights unavailable: {e}")
-            return ""
-
-    @staticmethod
-    def _merge_intelligence_insights(
-        intelligence_text: str,
-        insights_text: str,
-    ) -> str:
-        """
-        Merge V3.1 Memory Intelligence + V2.7 Phase C Insights into one section.
-
-        If both exist, concatenate with a separator.
-        If only one exists, return that alone.
-        """
-        if not intelligence_text and not insights_text:
-            return ""
-        if not insights_text:
-            return intelligence_text
-        if not intelligence_text:
-            return insights_text
-        return f"{intelligence_text}\n\n---\n\n{insights_text}"
+    # ── Global rules ──
 
     def _build_global_context(
         self,

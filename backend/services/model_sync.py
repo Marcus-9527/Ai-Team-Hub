@@ -148,7 +148,7 @@ async def _load_configured_apikeys() -> dict[str, str]:
         from backend.models import APIKey
         async with async_session() as db:
             rows = (await db.execute(select(APIKey))).scalars().all()
-        from backend.crypto import decrypt_value
+        from backend.security.crypto import decrypt_value
         result = {}
         for key in rows:
             if not key.api_key:

@@ -15,7 +15,7 @@ from typing import Optional
 
 from backend.services.dag.core import DAGDefinition
 from backend.services.planner.task_analyzer import TaskAnalyzer, TaskAnalysis
-from backend.services.planner.dag_builder import DAGBuilder
+from backend.services.dag.builder import DAGBuilder
 from backend.services.planner.dag_validator import DAGValidator, ValidationResult
 from backend.services.task.task_planner_schema import TaskPlan
 
@@ -95,12 +95,11 @@ class PlanningEngine:
             generate_plan,
             PlanningError as DriverPlanningError,
         )
-        from backend.routes.maeos import _get_maeos as get_maeos
-
-        maeos = await get_maeos()
+        from backend.routes.maeos import get_runtime
+        runtime = get_runtime()
         try:
             plan = await generate_plan(
-                maeos=maeos, goal=goal,
+                maeos=runtime, goal=goal,
                 task_id=task_id, context=context or {},
                 api_key=api_key, provider=provider,
             )

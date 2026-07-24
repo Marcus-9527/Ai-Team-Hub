@@ -28,31 +28,26 @@ from backend.services.task.task_executor import TaskExecutor
 from backend.services.task.task_plan_service import TaskPlanService
 from backend.services.planner.planning_engine import PlanningEngine, PlanningError
 from backend.services.planner.task_analyzer import TaskAnalyzer
-from backend.services.planner.dag_builder import DAGBuilder
+from backend.services.dag.builder import DAGBuilder
 from backend.services.teammate_intelligence import SkillRegistry, TeammateSelector
 from backend.services.task.task_planner_schema import TaskPlan, TaskStepProposal
 from backend.services.runtime.executor import ExecutionRuntime
-from backend.services.runtime.execution_store import SSEBroadcaster
 
 logger = logging.getLogger("task.orchestrator")
 
 # ── Task-level SSE Broadcaster ──
-# Reuses SSEBroadcaster from execution_store. Keyed by task_id.
-_task_broadcaster: Optional[SSEBroadcaster] = None
-
-
-def get_task_broadcaster() -> SSEBroadcaster:
-    global _task_broadcaster
-    if _task_broadcaster is None:
-        _task_broadcaster = SSEBroadcaster()
-    return _task_broadcaster
+# Reuses SSEBroadcaster from execution_store. Single instance shared across
+# the entire runtime (observability + task lifecycle events). Keyed by task_id.
+from backend.services.runtime.execution_store import get_sse_broadcaster
+from backend.services.organization.actions import OrganizationAction
+from backend.services.organization.task_adapter import TaskActionAdapter
 
 
 def _sse_event(event_type: str, task_id: str, data: dict) -> None:
     """Fire-and-forget SSE publish. Never blocks the orchestrator."""
     try:
         asyncio.ensure_future(
-            get_task_broadcaster().publish(f"task:{task_id}", event_type, data)
+            get_sse_broadcaster().publish(f"task:{task_id}", event_type, data)
         )
     except Exception:
         pass
@@ -65,12 +60,15 @@ class TaskOrchestrator:
         self._runtime = runtime
         self._manager = TaskManager()
         self._plan_service = TaskPlanService()
+        self._adapter: Optional[TaskActionAdapter] = None
 
-    async def start_task(self, db: AsyncSession, task_id: str, goal: str):
+    async def start_task(self, db: AsyncSession, task_id: str, goal: str, trigger_id: str = ""):
         """Full pipeline. Task transitions through PENDING→PLANNING→ASSIGNED→RUNNING→done.
 
         Returns the task with its final status.
         """
+        self._trigger_id = trigger_id
+        self._adapter = TaskActionAdapter(db, trigger_id=trigger_id)
         task = None
         try:
             await db.flush()
@@ -142,6 +140,7 @@ class TaskOrchestrator:
             })
 
             # 5. Execute (ASSIGNED → RUNNING → COMPLETED/FAILED)
+            await self._adapter.emit_start(OrganizationAction.EXECUTE, task_id=task_id)
             try:
                 task = await asyncio.wait_for(
                     self._execute(db, task), timeout=120.0
@@ -152,6 +151,9 @@ class TaskOrchestrator:
                 if task and task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
                     task = await self._manager.fail(db, task_id)
                     await db.flush()
+                await self._adapter.emit_end(OrganizationAction.EXECUTE, error="Execution timed out")
+            else:
+                await self._adapter.emit_end(OrganizationAction.EXECUTE)
             await db.commit()
 
             _sse_event("execution_completed", task_id, {
@@ -178,9 +180,12 @@ class TaskOrchestrator:
                 except Exception as e:
                     logger.warning("[ORCH] techlead_relay failed for %s: %s", task_id[:8], e)
                 try:
+                    await self._adapter.emit_start(OrganizationAction.REVIEW, task_id=task_id)
                     await self._review_relay(db, task)
+                    await self._adapter.emit_end(OrganizationAction.REVIEW)
                     await db.commit()
                 except Exception as e:
+                    await self._adapter.emit_end(OrganizationAction.REVIEW, error=str(e)[:200])
                     logger.warning("[ORCH] review_relay failed for %s: %s", task_id[:8], e)
 
             # Phase 27: Finalize TaskRun
@@ -191,6 +196,10 @@ class TaskOrchestrator:
                     await db.flush()
             except Exception:
                 pass
+
+            # Phase 2.2: COMPLETE action
+            await self._adapter.emit_start(OrganizationAction.COMPLETE, task_id=task_id)
+            await self._adapter.emit_end(OrganizationAction.COMPLETE)
 
             return task
         except Exception as e:
@@ -221,6 +230,8 @@ class TaskOrchestrator:
 
     async def _plan(self, goal: str, task_id: str, workspace_id: str = "", db: AsyncSession = None):
         """Try PlanningEngine, fallback to keyword analysis + teammate profiles."""
+        await self._adapter.emit_start(OrganizationAction.PLAN)
+
         engine = PlanningEngine()
 
         # Resolve workspace-scoped API key using the caller's db session
@@ -228,32 +239,21 @@ class TaskOrchestrator:
         api_key = ""
         provider = "openrouter"
         if workspace_id and db is not None:
-            try:
-                from backend.models import APIKey
-                from backend.crypto import decrypt_value
-                from sqlalchemy import select
-                result = await db.execute(
-                    select(APIKey)
-                    .where(APIKey.is_active == "1")
-                    .where(APIKey.workspace_id == workspace_id)
-                    .limit(1)
+            from backend.services.runtime.teammate_runner import resolve_workspace_api_key
+            resolved = await resolve_workspace_api_key(workspace_id, db_session=db)
+            if resolved:
+                api_key, _, provider = resolved
+                provider = provider or "openrouter"
+                logger.info("[ORCH] resolved key for ws=%s (len=%d prov=%s)",
+                             workspace_id[:12], len(api_key), provider)
+            if not api_key:
+                await self._adapter.emit_end(
+                    OrganizationAction.PLAN,
+                    error="Workspace has no active API key configured",
                 )
-                row = result.scalar_one_or_none()
-                if row:
-                    plain = decrypt_value(row.api_key)
-                    if plain:
-                        api_key = plain
-                        provider = row.provider or "openrouter"
-                        logger.info("[ORCH] resolved key for ws=%s: key_len=%d provider=%s",
-                                     workspace_id[:12], len(plain), provider)
-                if not api_key:
-                    raise RuntimeError(
-                        f"Workspace {workspace_id[:12]}... has no active API key configured."
-                    )
-            except RuntimeError:
-                raise
-            except Exception as e:
-                raise RuntimeError(f"Failed to resolve API key: {e}") from e
+                raise RuntimeError(
+                    f"Workspace {workspace_id[:12]}... has no active API key configured."
+                )
 
         try:
             dag = await asyncio.wait_for(
@@ -265,6 +265,7 @@ class TaskOrchestrator:
                 timeout=15.0,
             )
             if dag and dag.nodes:
+                await self._adapter.emit_end(OrganizationAction.PLAN)
                 return dag
         except (PlanningError, ImportError, RuntimeError, ValueError, asyncio.TimeoutError) as e:
             logger.warning("[ORCH] PlanningEngine: %s", e)
@@ -295,7 +296,10 @@ class TaskOrchestrator:
                 description=f"Keyword [{analysis.task_type}]",
                 steps=steps,
             )
-            return DAGBuilder().build(plan)
+            dag = DAGBuilder().build(plan)
+            await self._adapter.emit_end(OrganizationAction.PLAN)
+            return dag
+        await self._adapter.emit_end(OrganizationAction.PLAN)
         return None
 
     async def _persist_dag(self, db: AsyncSession, dag, task_id: str) -> None:
@@ -304,6 +308,7 @@ class TaskOrchestrator:
             id=dag.id,
             name=dag.name or f"dag_{task_id[:8]}",
             status="ACTIVE",
+            task_id=task_id,
         )
         db.add(dag_model)
         await db.flush()
@@ -498,7 +503,7 @@ class TaskOrchestrator:
         await db.commit()
         if self._runtime is None:
             self._runtime = ExecutionRuntime(max_workers=4)
-        executor = TaskExecutor(runtime=self._runtime)
+        executor = TaskExecutor(runtime=self._runtime, trigger_id=self._trigger_id)
         task = await executor.execute_task(db, task)
         await db.commit()
         return task
@@ -547,6 +552,9 @@ class TaskOrchestrator:
             f"}}"
         )
 
+        # ── Phase 2.2: action timeline for techlead review ──
+        await self._adapter.emit_start(OrganizationAction.REVIEW)
+
         executor = TaskExecutor(runtime=self._runtime)
         try:
             rt = await executor.execute_direct(
@@ -573,7 +581,9 @@ class TaskOrchestrator:
                             logger.info("[ORCH] TechLead HIGH risk → policy approval_required for %s", task.id[:8])
                         except Exception:
                             pass
+            await self._adapter.emit_end(OrganizationAction.REVIEW)
         except Exception as e:
+            await self._adapter.emit_end(OrganizationAction.REVIEW, error=str(e)[:500])
             logger.warning("[ORCH] TechLead review failed for %s: %s", task.id[:8], e)
 
     # ── Phase 25: TechLead synthesis relay (post-execution) ──

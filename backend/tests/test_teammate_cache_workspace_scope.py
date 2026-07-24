@@ -18,7 +18,6 @@ from fastapi import Request
 from backend.cache import teammate_cache
 from backend.routes.teammates import _list_key, list_teammates, _serialize_teammate
 from backend.services.memory.memory_service import get_memory_service
-from backend.services.memory.memory_intelligence import get_intelligence_service
 
 WS_A = "test-ws-a-teammate-cache"
 WS_B = "test-ws-b-teammate-cache"

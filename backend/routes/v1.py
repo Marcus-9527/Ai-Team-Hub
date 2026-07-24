@@ -2,16 +2,13 @@
 routes/v1.py — Simplified Public API
 
 Only 3 endpoints:
-  POST /v1/chat     — Send a message, get AI response (streaming)
+  POST /v1/chat     — Send a message, get AI response (always streaming)
   POST /v1/upload   — Upload a file
   GET  /v1/health   — Health check
 """
-import time
-import uuid
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+
 
 router = APIRouter(prefix="/v1", tags=["v1-public"])
 
@@ -19,14 +16,12 @@ router = APIRouter(prefix="/v1", tags=["v1-public"])
 class ChatRequest(BaseModel):
     channel_id: str
     message: str
-    stream: Optional[bool] = True
 
     class Config:
         json_schema_extra = {
             "example": {
                 "channel_id": "chan_abc123",
                 "message": "Help me analyze this data",
-                "stream": True,
             }
         }
 
@@ -49,39 +44,17 @@ class HealthResponse(BaseModel):
 async def v1_chat(req: ChatRequest, request: Request):
     """
     Send a message to the team and get a streaming collaborative response.
-    Uses team_collaboration engine for multi-teammate synthesis.
+    Uses the OrganizationRuntime for multi-teammate synthesis.
     """
     from backend.routes.messages import send_message
     from backend.database import async_session
 
-    if req.stream:
-        async with async_session() as db:
-            return await send_message(
-                channel_id=req.channel_id,
-                data={"content": req.message, "author_name": "You"},
-                db=db,
-            )
-    else:
-        # Non-streaming: collect full response
-        from backend.services.pipeline import run_pipeline
-        from backend.services.key_vault_service import get_key_by_provider
-
-        # Get API key from Key Vault (decrypted in memory)
-        key_info = await get_key_by_provider("openrouter")
-        api_key, base_url = (key_info[1], key_info[2]) if key_info else ("", "")
-
-        response_text = await run_pipeline(
+    async with async_session() as db:
+        return await send_message(
             channel_id=req.channel_id,
-            user_message=req.message,
-            api_key=api_key,
-            base_url=base_url or None,
+            data={"content": req.message, "author_name": "You"},
+            db=db,
         )
-
-        return {
-            "status": "ok",
-            "response": response_text,
-            "latency": "0ms",
-        }
 
 
 @router.post("/upload")

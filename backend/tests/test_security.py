@@ -16,13 +16,13 @@ class TestEncryption:
 
     def test_crypto_imports(self):
         """Core crypto modules should be importable."""
-        from backend.crypto import encrypt_value, decrypt_value
+        from backend.security.crypto import encrypt_value, decrypt_value
         assert callable(encrypt_value)
         assert callable(decrypt_value)
 
     def test_encrypt_decrypt_roundtrip(self):
         """Encrypting then decrypting should return original value."""
-        from backend.crypto import encrypt_value, decrypt_value
+        from backend.security.crypto import encrypt_value, decrypt_value
 
         original = "sk-test-secret-key"
         encrypted = encrypt_value(original)

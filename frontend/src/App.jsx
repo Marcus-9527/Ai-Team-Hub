@@ -9,14 +9,6 @@ import {
 import { LangProvider } from './i18n';
 import ErrorBoundary from './components/ErrorBoundary';
 import ToastHost from './components/ToastHost';
-import {
-  listChannels,
-  listAPIKeys,
-  listTeammates,
-  createTeammate,
-  createChannel,
-  addTeammateToChannel,
-} from './services/api';
 import { isLoggedIn, setSession } from './services/auth';
 
 import LandingPage from './components/Landing/LandingPage';
@@ -27,50 +19,8 @@ import './styles/landing.css';
 // /app 主壳整体懒加载:framer-motion 等依赖全部移出首屏
 const AppShell = lazy(() => import('./AppShell'));
 
-// ponytail: 首次进入 app 时若无频道,自动建默认频道+两个队友
-async function ensureDefaultData() {
-  try {
-    const ch = await listChannels();
-    if (ch.length > 0) return;
-    const keys = await listAPIKeys();
-    let keyId = keys.length > 0 ? keys[0].id : null;
-    const tm = await listTeammates();
-    let engineerId, pmId;
-    if (tm.length === 0 && keyId) {
-      const [engineer, pm] = await Promise.all([
-        createTeammate({
-          name: '高级工程师',
-          role: 'engineer',
-          avatar_emoji: '👨‍💻',
-          system_prompt: 'You are a Senior Engineer. Write clean, efficient code.',
-          model_provider: 'openrouter',
-          model_name: 'openrouter/auto',
-          api_key_ref: keyId,
-        }),
-        createTeammate({
-          name: '产品经理',
-          role: 'pm',
-          avatar_emoji: '🧠',
-          system_prompt:
-            'You are a Product Manager. Focus on user needs and strategic decisions.',
-          model_provider: 'openrouter',
-          model_name: 'openrouter/auto',
-          api_key_ref: keyId,
-        }),
-      ]);
-      engineerId = engineer.id;
-      pmId = pm.id;
-    } else if (tm.length > 0) {
-      engineerId = tm[0].id;
-      pmId = tm.length > 1 ? tm[1].id : null;
-    }
-    const newCh = await createChannel({ name: 'General', description: 'Main chat channel' });
-    if (engineerId) await addTeammateToChannel(newCh.id, engineerId);
-    if (pmId) await addTeammateToChannel(newCh.id, pmId);
-  } catch (e) {
-    console.error('Init failed:', e);
-  }
-}
+// ponytail: first-run data seeding moved to backend startup.py
+// (ensure_default_data in startup.py runs during lifespan)
 
 function AuthGate({ onNavigateToLanding }) {
   const navigate = useNavigate();
@@ -81,7 +31,7 @@ function AuthGate({ onNavigateToLanding }) {
       navigate('/auth', { replace: true });
       return;
     }
-    ensureDefaultData().finally(() => setChecked(true));
+    setChecked(true);
   }, [navigate]);
 
   if (!isLoggedIn()) return null;

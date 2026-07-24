@@ -5,14 +5,11 @@ Architecture:
   CACHE LAYER (static)  → cache_key.py + cache_prefix_builder.py
   DYNAMIC LAYER         → context_builder.py
   MEMORY ENGINE         → memory (intelligence layer) + memory_summarizer
-  LLM RUNTIME           → ai_service.py (stream_ai_response + warmup_cache)
 
 Flow:
-  1. compute_cache_key(system_prompt) → static key
-  2. build_fixed_prefix(system_prompt, recent_turns, current_input) → 9 messages
-  3. warmup_cache(system_prompt) → prime DeepSeek cache entry
-  4. stream_ai_response(system_prompt, messages) → LLM call
-  5. process_conversation_turn() → memory write-back
+  → OrganizationRuntime.handle_input()
+  → TeammateRunner.stream_teammate() → AgentLoop → LLM
+  → process_conversation_turn() → memory write-back
 """
 import asyncio
 import json
@@ -30,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db, async_session
 from backend.models import Message, Channel, Teammate, APIKey
-from backend.services.ai_service import stream_ai_response
 from backend.services.cache_prefix_builder import build_fixed_prefix, extract_recent_turns
 from backend.services.cache_warmup_service import is_warmed_up, mark_warmed_up
 from backend.cache import message_cache, teammate_cache, apikey_cache
@@ -406,6 +402,33 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         user_msg_id = user_msg.id
         message_cache.invalidate(channel_id)
 
+    # ── Session Trigger: log this user message ──
+    from backend.services.session.session_hooks import SessionHooks
+    from backend.models import TurnAction
+    session_hooks = SessionHooks(db)
+    session_trigger = None
+    tm_turns: dict[str, str] = {}
+    if user_msg_id:
+        session_trigger = await session_hooks.open_trigger(
+            channel_id=channel_id, user_msg_id=user_msg_id,
+        )
+
+    # ── OrganizationRun: wrap this chat in a CHAT run via OrganizationRuntime ──
+    if session_trigger:
+        from backend.services.organization.runtime import OrganizationRuntime
+        runtime = OrganizationRuntime(db)
+        org_run = await runtime.start_run(
+            run_type="chat",
+            source_id=session_trigger.id,
+            channel_id=channel_id,
+            workspace_id=channel.workspace_id or "",
+            title=f"Chat: {content[:100]}",
+        )
+        session_trigger.run_id = org_run.id
+        await db.flush()
+        # Emit run.created event on the linked trigger
+        await runtime.emit_run_event(session_trigger.id, "run.created", org_run.id)
+
     # ── Inject memory context before team response ──
     from backend.services.memory.memory_context import get_memory_context
     mem_ctx = await get_memory_context().build_chat_context(channel_id, content)
@@ -413,7 +436,6 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
         content = f"[Previous context]\n{mem_ctx.text}\n\n---\n\n{content}"
 
     # ── Team Collaboration: all teammates respond ──
-    from backend.services.team_collaboration import generate_team_response
     from backend.models import Channel as ChannelModel
 
     # Get all teammates in this channel
@@ -532,6 +554,19 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
             active_teammates.append(tm)
         else:
             ceded_teammates.append(dict(tm))
+
+        # ── Session Turn: record decide/cede for this teammate ──
+        if session_trigger:
+            if decision.value == "respond":
+                turn = await session_hooks.start_turn(
+                    session_trigger.id, teammate_id=tm["id"],
+                )
+                tm_turns[tm["id"]] = turn.id
+            else:
+                await session_hooks.record_turn(
+                    session_trigger.id, teammate_id=tm["id"],
+                    action=TurnAction.CEDED,
+                )
     all_teammates = active_teammates
 
     # Team-mode chit-chat with no relevant teammate: nobody responds.
@@ -552,7 +587,9 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
                     "type": "system_message",
                     "payload": {"content": f"**{ctm.get('name', '?')}** chose not to respond ({ctm.get('role', '?')})"},
                 }) + "\n\n"
-            async for chunk in generate_team_response(
+            async for chunk in runtime.handle_input(
+                run_id=org_run.id,
+                trigger_id=session_trigger.id,
                 teammates=all_teammates,
                 user_message=content,
                 channel_id=channel_id,
@@ -586,7 +623,20 @@ async def send_message(channel_id: str, data: dict, db: AsyncSession = Depends(g
             tm_names=[tm["name"] for tm in all_teammates],
             all_messages=all_messages,
             content=content,
+            session_trigger_id=session_trigger.id if session_trigger else None,
+            session_turn_ids=tm_turns if session_trigger else None,
         )
+
+        # ── SessionEvent → Organization Memory (chat) ──
+        if session_trigger:
+            try:
+                from backend.database import async_session as _mem_db
+                from backend.services.memory.event_processor import get_event_processor
+                async with _mem_db() as mem_sess:
+                    await get_event_processor().process_trigger(mem_sess, session_trigger.id)
+                    await mem_sess.commit()
+            except Exception as me:
+                logger.warning("[CHAT-MEM] memory processing failed (non-fatal): %s", me)
 
     import asyncio
     from starlette.background import BackgroundTask
@@ -603,6 +653,8 @@ async def _save_team_response_from_events(
     tm_names: list[str],
     all_messages: list = None,
     content: Any = None,
+    session_trigger_id: str | None = None,
+    session_turn_ids: dict[str, str] | None = None,
 ):
     """Save team collaboration response to database from structured events.
 
@@ -670,6 +722,16 @@ async def _save_team_response_from_events(
                     status="replied",
                 )
                 sess.add(ai_msg)
+
+                # ── Session Turn: close this teammate's response turn ──
+                if session_turn_ids and tm_id in session_turn_ids:
+                    from backend.models.session import SessionTurn as _ST, TurnAction as _TA
+                    from datetime import datetime, timezone
+                    _trn = await sess.get(_ST, session_turn_ids[tm_id])
+                    if _trn:
+                        _trn.action = _TA.RESPONDED.value
+                        _trn.response_msg_id = msg_id
+                        _trn.end_time = datetime.now(timezone.utc)
             await sess.commit()
             message_cache.invalidate(channel_id)
             logger.info(f"Team response saved ({len(responses)} individual messages)")
@@ -729,33 +791,3 @@ async def _save_team_response_from_events(
     except Exception as e:
         logger.error(f"Failed to save team response: {e}", exc_info=True)
 
-
-async def _save_ai_response_to_db(
-    full_response: str,
-    channel_id: str,
-    teammate_id: str,
-    tm_name: str,
-    all_messages: list,
-    content: Any,
-    provider: str,
-    model: str,
-    api_key: str = None,
-    base_url: str = None,
-):
-    """Save AI response to database (called from background task) — kept for compat"""
-    try:
-        async with async_session() as sess:
-            ai_msg = Message(
-                channel_id=channel_id, role="ai",
-                author_name=tm_name, author_id=teammate_id,
-                content=full_response,
-            )
-            sess.add(ai_msg)
-            await sess.commit()
-            message_cache.invalidate(channel_id)
-            logger.info(f"AI response saved: {len(full_response)} chars")
-
-        # Memory write-back (non-blocking) — memory kernel is not yet wired
-        logger.debug(f"Memory turn recorded: channel={channel_id} teammate={teammate_id} content_len={len(full_response)}")
-    except Exception as e:
-        logger.error(f"Failed to save AI response: {e}")

@@ -313,6 +313,14 @@ class MemoryService:
             "by_type": by_type,
         }
 
+    async def query_by_scope(self, scope: str, *, limit: int = 20) -> list[MemoryItem]:
+        """Post-filter memory_items by metadata.scope.
+
+        ponytail: full scan, narrow with dedicated column if >10K rows.
+        """
+        items = await self.query(limit=max(limit * 5, 200))
+        return [i for i in items if (i.metadata or {}).get("scope") == scope][:limit]
+
     async def prune(
         self,
         memory_type: str,

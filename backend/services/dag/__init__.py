@@ -8,6 +8,13 @@ from backend.services.dag.core import (
     detect_cycle,
     get_ready_nodes,
 )
+from backend.services.dag.builder import DAGBuilder
+from backend.services.dag.executor import (
+    DAGStore,
+    get_dag_store,
+    reset_dag_store,
+    execute_dag,
+)
 
 __all__ = [
     "DAGNode",
@@ -16,4 +23,9 @@ __all__ = [
     "topological_sort",
     "detect_cycle",
     "get_ready_nodes",
+    "DAGBuilder",
+    "DAGStore",
+    "get_dag_store",
+    "reset_dag_store",
+    "execute_dag",
 ]

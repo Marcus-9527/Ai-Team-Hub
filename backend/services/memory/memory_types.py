@@ -35,6 +35,9 @@ class MemoryType(str, Enum):
     EXECUTION = "EXECUTION"
     DECISION = "DECISION"
     EVENT = "EVENT"
+    MEMBER_KNOWLEDGE = "MEMBER_KNOWLEDGE"
+    TEAM_PATTERN = "TEAM_PATTERN"
+    PROJECT_KNOWLEDGE = "PROJECT_KNOWLEDGE"
 
     @classmethod
     def priority(cls, memory_type: str) -> int:

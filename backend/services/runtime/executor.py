@@ -3,7 +3,6 @@ runtime/executor.py — Unified Execution Runtime (v3.1)
 
 Single entry point for all AI execution:
   - Task mode:  execute()      → pipeline.run_pipeline()
-  - Chat mode:  stream_execute() → TeammateRunner streaming
   - Status:     get_status()
   - Observability: execution_store (token/cost tracking + SSE)
 
@@ -16,7 +15,7 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 from backend.services.pipeline import run_pipeline
 from backend.services.runtime.retry_policy import RetryPolicy, BackoffStrategy
@@ -193,9 +192,6 @@ class ExecutionRuntime:
     Task mode:
         task = await runtime.execute(description="...", ...)
 
-    Chat mode (SSE):
-        async for chunk in runtime.stream_execute(...): yield chunk
-
     Status:
         status = runtime.get_status(task_id)
     """
@@ -359,25 +355,6 @@ class ExecutionRuntime:
         self._completed_events.pop(task_id, None)
         return self._queue.get(task_id)
 
-    async def stream_execute(
-        self,
-        user_message: str,
-        system_prompt: str = None,
-        provider: str = None,
-        model: str = None,
-        api_key: str = None,
-        base_url: str = None,
-    ) -> AsyncGenerator[str, None]:
-        """
-        Streaming execution — wraps pipeline run with SSE output.
-
-        Yields SSE-formatted chunks for real-time display.
-        """
-        from backend.services.team_collaboration import _run_single_teammate
-        raise NotImplementedError(
-            "stream_execute is for chat-mode. Use TeammateRunner directly."
-        )
-
     def get_status(self, task_id: str) -> Optional[dict]:
         """Get execution status."""
         task = self._queue.get(task_id)
@@ -431,7 +408,11 @@ class ExecutionRuntime:
                 await asyncio.sleep(1.0)
 
     async def _run_task(self, worker: dict, task: RuntimeTask) -> None:
-        """Run a single task and signal completion — with observability tracking."""
+        """Run a single task and signal completion — with observability tracking.
+
+        ponytail: ~200 lines, 4 role branches, clean try/except. No split
+        until a 5th branch or a bug demands it — indirection isn't clarity.
+        """
         execution = self._execution_store.create(
             execution_id=task.id,
             task_id=task.id,
@@ -466,6 +447,7 @@ class ExecutionRuntime:
                 brain = await get_brain_loader().build_prompt(
                     teammate.get("id", ""),
                     query=task.description or "",
+                    workspace_id=task.workspace_id or "",
                 )
                 if brain:
                     teammate["system_prompt"] = brain + "\n\n" + (teammate.get("system_prompt", "") or "")

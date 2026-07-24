@@ -1,13 +1,7 @@
-"""brain/brain_loader.py — BrainLoader (Phase 12.2)
+"""brain/brain_loader.py — BrainLoader (Phase 12.2 + 7.0)
 
-统一 AI 上下文入口：从 brain fragments + memory items 构建完整的 LLM prompt。
-用于 chat/task/engineer/reviewer/techlead 全链路。
-
-调用链：
-  TeammateRuntimeContext → BrainLoader → build_prompt() → LLM
-
-Ponytail: 核心就是 build_prompt() 一个函数+一个缓存层。
-不需要多态 loader 工厂。
+统一 AI 上下文入口。Data fetching delegated to BrainContextAssembler.
+BrainLoader is a pure formatter: brain_context dict → prompt markdown.
 """
 from __future__ import annotations
 
@@ -19,7 +13,8 @@ from backend.services.brain.fragment_store import (
     get_brain_fragment_store,
     BrainFragmentType,
 )
-from backend.services.memory.memory_service import get_memory_service, MemoryService
+from backend.services.brain.context import BrainContextAssembler
+from backend.services.memory.memory_service import MemoryService, get_memory_service
 
 logger = logging.getLogger("brain.loader")
 
@@ -36,11 +31,18 @@ _FRAGMENT_HEADERS = {
 }
 _RELEVANT_TYPES = list(_FRAGMENT_HEADERS.keys())
 
+# ── Knowledge type value → section header ──
+_KNOWLEDGE_HEADERS = {
+    "PROJECT_KNOWLEDGE": "## PROJECT KNOWLEDGE",
+    "MEMBER_KNOWLEDGE": "## MEMBER KNOWLEDGE",
+    "TEAM_PATTERN": "## TEAM PATTERNS",
+}
+
 
 class BrainLoader:
-    """Build unified AI context from brain fragments + memory.
+    """Build unified AI context from assembled brain data.
 
-    Entry point for all prompt construction across the system.
+    Pure formatter: receives assembled dict (via build_prompt), returns markdown.
     """
 
     def __init__(
@@ -50,37 +52,35 @@ class BrainLoader:
     ):
         self._store = fragment_store or get_brain_fragment_store()
         self._mem_svc = memory_service or get_memory_service()
+        self._assembler = BrainContextAssembler(self._store, self._mem_svc)
 
     async def build_prompt(
         self,
         teammate_id: str,
         *,
+        workspace_id: str = "",
         recent_memory_limit: int = 10,
         extra_context: str = "",
         query: Optional[str] = None,
+        db: Optional["AsyncSession"] = None,
+        experience: Optional[list[dict]] = None,
     ) -> str:
         """Build the full system prompt for a teammate.
 
-        When a query string is provided, uses semantic recall (embedding
-        similarity) instead of keyword-based memory retrieval. The query
-        is typically the user's message or task description.
-
-        Returns a string that should be PREPENDED to the teammate's
-        existing system_prompt. Can also be used standalone.
-
-        Sections (when present):
-          1. IDENTITY
-          2. PERSONALITY
-          3. PRINCIPLES
-          4. RESPONSIBILITIES
-          5. SKILLS & ABILITIES
-          6. LESSONS LEARNED
-          7. PAST DECISIONS
-          8. PREFERENCES
-          9. RECENT MEMORY / RELEVANT MEMORY (semantic when query provided)
+        Delegates data fetching to BrainContextAssembler, then formats.
         """
-        fragments = await self._store.get_all_by_teammate(teammate_id)
-        if not fragments:
+        ctx = await self._assembler.assemble(
+            teammate_id, workspace_id=workspace_id, query=query, db=db,
+            recent_memory_limit=recent_memory_limit, experience=experience,
+        )
+        return self._format(ctx, extra_context=extra_context)
+
+    def _format(self, ctx: dict, extra_context: str = "") -> str:
+        """Pure formatter: assembled dict → prompt markdown."""
+        fragments = ctx["fragments"]
+        if not fragments and not ctx.get("workspace_id") and not ctx.get("identity") and not ctx["experience"] \
+           and not ctx.get("teammate_profile") and not ctx.get("history_summary") \
+           and not ctx.get("collaboration_pattern") and not ctx.get("knowledge_items"):
             return extra_context
 
         sections: list[str] = [
@@ -88,43 +88,112 @@ class BrainLoader:
             "These are facts about yourself built from past experience.",
         ]
 
-        # Build a lookup for quick section building
-        frag_map: dict[str, str] = {}
-        for f in fragments:
-            frag_map[f.fragment_type] = f.content
-
-        # Non-empty sections ordered by type priority
+        # ── Fragment sections ──
+        frag_map = {f.fragment_type: f.content for f in fragments}
         for ftype in _RELEVANT_TYPES:
             content = frag_map.get(ftype.value)
             if not content:
                 continue
-            header = _FRAGMENT_HEADERS[ftype]
-            sections.append(f"\n{header}\n{content}")
+            sections.append(f"\n{_FRAGMENT_HEADERS[ftype]}\n{content}")
 
-        # Memory context — semantic when query provided, keyword otherwise
-        if recent_memory_limit > 0:
-            if query:
-                mem_text = await self.semantic_recall(
-                    query,
-                    teammate_id=teammate_id,
-                    top_k=recent_memory_limit,
-                )
-                if mem_text:
-                    sections.append(f"\n## RELEVANT MEMORY\n{mem_text}")
-            else:
-                mem_items = await self._mem_svc.query_teammate_memory(
-                    teammate_id, limit=recent_memory_limit,
-                )
-                if mem_items:
-                    mem_lines = ["\n## RECENT EXPERIENCE"]
-                    for m in mem_items:
-                        preview = (m.content or "")[:200].replace("\n", " ")
-                        mem_lines.append(f"  - {preview}")
-                    sections.append("\n".join(mem_lines))
+        # ── Teammate Identity ──
+        ident = ctx.get("identity")
+        if ident:
+            id_lines: list[str] = ["\n## TEAMMATE IDENTITY"]
+            id_lines.append(f"You are the {ident['role']} teammate.")
+            if ident.get("capabilities"):
+                id_lines.append(f"Your capabilities: {', '.join(ident['capabilities'])}")
+            for b in ident.get("learned_behaviors", []):
+                id_lines.append(f"  - {b[:200].replace(chr(10), ' ')}")
+            perf = ident.get("recent_performance", {})
+            if perf.get("total_actions", 0) > 0:
+                id_lines.append(f"Recent performance: {perf['completed']}/{perf['total_actions']} actions completed, {perf.get('failed', 0)} failed.")
+            trend = ident.get("performance_trend", {})
+            cur = trend.get("current", {})
+            td = trend.get("trend", {})
+            if cur.get("success_rate", 0) > 0:
+                direction = "improving" if td.get("completed", 0) > 0 and td.get("failed", 0) <= 0 else "declining" if td.get("failed", 0) > 0 else "stable"
+                id_lines.append(f"Performance trend: success rate {cur['success_rate']:.0%}, {direction}")
+            sections.append("\n".join(id_lines))
+
+        # ── Organization Knowledge ──
+        knowledge_items = ctx.get("knowledge_items", {})
+        if knowledge_items:
+            k_sections: list[str] = []
+            for ktype_val, header in _KNOWLEDGE_HEADERS.items():
+                items = knowledge_items.get(ktype_val)
+                if not items:
+                    continue
+                lines: list[str] = [f"\n{header}"]
+                for m in items:
+                    lines.append(f"  - {(m.content or '')[:200].replace(chr(10), ' ')}")
+                k_sections.append("\n".join(lines))
+            if k_sections:
+                sections.append("\n".join(k_sections))
+
+        # ── Memory context ──
+        mem_text = ctx.get("recent_memory_text", "")
+        if mem_text:
+            header = "## RELEVANT MEMORY" if ctx.get("recent_memory_is_semantic") else "## RECENT EXPERIENCE"
+            sections.append(f"\n{header}\n{mem_text}")
 
         prompt = "\n".join(sections)
         if extra_context:
             prompt += f"\n\n{extra_context}"
+
+        # ── Organization Experience ──
+        experience = ctx["experience"]
+        if experience:
+            exp_lines: list[str] = ["\n\n## ORGANIZATION EXPERIENCE", "Previous similar tasks:"]
+            for e in experience[:5]:
+                goal = (e.get("goal") or "")[:200]
+                tm_v = (e.get("teammate") or "")[:100]
+                result = (e.get("result") or "")[:100]
+                lesson = (e.get("lesson") or "")[:100]
+                entry = f"- task: {goal}"
+                if tm_v:
+                    entry += f"\n  teammate: {tm_v}"
+                if result:
+                    entry += f"\n  approach: {result}"
+                if lesson:
+                    entry += f"\n  lesson: {lesson}"
+                entry = entry[:500]
+                exp_lines.append(entry)
+            if len(exp_lines) > 1:
+                prompt += "\n".join(exp_lines)
+
+        # ── Phase 14: Teammate profile sections ──
+        profile = ctx.get("teammate_profile", {})
+        if profile:
+            style_parts = []
+            if profile.get("personality"):
+                style_parts.append(f"\n\n## TEAMMATE WORKING STYLE\n{profile['personality']}")
+            if profile.get("preferences"):
+                style_parts.append(f"\n\n## TEAMMATE PREFERENCES\n{profile['preferences']}")
+            if profile.get("expertise"):
+                style_parts.append(f"\n## TEAMMATE EXPERTISE\n{', '.join(profile['expertise'])}")
+            if style_parts:
+                prompt += "".join(style_parts)
+
+        # ── Phase 14: History summary ──
+        hist = ctx.get("history_summary", "")
+        if hist:
+            prompt += f"\n\n## TEAMMATE HISTORY\nRecent actions in this workspace:\n{hist}"
+
+        # ── Phase 14: Collaboration pattern ──
+        collab = ctx.get("collaboration_pattern", "")
+        if collab:
+            prompt += f"\n\n## COLLABORATION PATTERN\n{collab}"
+
+        # ── Team / Project context ──
+        for items, header in [
+            (ctx.get("team_items", []), "\n\n## TEAM STATE"),
+            (ctx.get("proj_items", []), "\n\n## PROJECT CONTEXT"),
+        ]:
+            if items:
+                prompt += header
+                for m in items:
+                    prompt += f"\n  - {(m.content or '')[:200].replace(chr(10), ' ')}"
 
         return prompt
 
@@ -137,38 +206,10 @@ class BrainLoader:
         top_k: int = 10,
         min_score: float = 0.1,
     ) -> str:
-        """Semantic recall: embed query → scoped similarity search → formatted text.
-
-        Returns a plain-text block of relevant memories for prompt injection,
-        or empty string when nothing matches.
-
-        Scope isolation is enforced via metadata_filters on memory_items:
-          - teammate_id (always)
-          - scope      (optional: "private" | "workspace" | "channel" | "review")
-        """
-        if not query or not query.strip():
-            return ""
-
-        query_vector = self._mem_svc.compute_embedding(query)
-        filters: dict = {"teammate_id": teammate_id}
-        if scope:
-            filters["scope"] = scope
-
-        items = await self._mem_svc.semantic_search(
-            query_vector,
-            top_k=top_k,
-            min_score=min_score,
-            metadata_filters=filters,
+        """Delegate to assembler for backward compat."""
+        return await self._assembler.semantic_recall(
+            query, teammate_id=teammate_id, scope=scope, top_k=top_k, min_score=min_score,
         )
-        if not items:
-            return ""
-
-        lines: list[str] = []
-        for m in items:
-            preview = (m.content or "")[:300].replace("\n", " ")
-            score = m.relevance_score
-            lines.append(f"  - [{score:.2f}] {preview}")
-        return "\n".join(lines)
 
     async def build_identity_block(self, teammate_id: str) -> str:
         """Shortcut: return only the IDENTITY + PERSONALITY section as one string."""

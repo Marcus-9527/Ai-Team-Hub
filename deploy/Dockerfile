@@ -26,7 +26,6 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Copy application code
 COPY backend/ ./backend/
-COPY worker/ ./worker/
 COPY deploy/.env.example ./deploy/.env.example
 
 # Copy built frontend from stage 1

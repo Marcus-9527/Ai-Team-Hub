@@ -25,7 +25,7 @@ WS_KEY = "sk-planner-workspace-scoped-key-value-64-chars-long-aaaaaaaaaaaa"
 
 async def _create_key(sess, workspace_id, label, body):
     from backend.models import APIKey
-    from backend.crypto import encrypt_value
+    from backend.security.crypto import encrypt_value
     k = APIKey(
         workspace_id=workspace_id,
         provider="openrouter",
@@ -80,8 +80,8 @@ async def test_planner_path_resolves_workspace_key_not_legacy():
             "backend.services.task.task_planner_driver.generate_plan",
             new=fake_generate_plan,
         ), patch(
-            "backend.routes.maeos._get_maeos",
-            new=AsyncMock(return_value=object()),
+            "backend.routes.maeos.get_runtime",
+            return_value=object(),
         ):
             async with async_session() as db:
                 dag = await orch._plan(

@@ -70,13 +70,14 @@ class TaskExecutor:
     and its result is recorded before the next step begins.
     """
 
-    def __init__(self, runtime: Optional[ExecutionRuntime] = None, retry_policy: Optional[RetryPolicy] = None):
+    def __init__(self, runtime: Optional[ExecutionRuntime] = None, retry_policy: Optional[RetryPolicy] = None, trigger_id: str = ""):
         self.state = TaskStateManager()
         self.context_builder = TaskContextBuilder()
         self.result_handler = TaskResultHandler()
         self.approval = TaskApprovalService()
         self.policy = TaskPolicyService()
         self._runtime = runtime  # ExecutionRuntime singleton
+        self._trigger_id = trigger_id
         self.retry_policy = retry_policy or RetryPolicy(
             max_retries=2,
             backoff_strategy=BackoffStrategy.LINEAR,
@@ -349,6 +350,25 @@ class TaskExecutor:
         attempt = 1
         max_attempts = self.retry_policy.max_retries + 1
 
+        # ── Phase 2.2: SessionTurn per step ──
+        _step_turn = None
+        if self._trigger_id:
+            from backend.services.session.session_hooks import SessionHooks
+            _step_hooks = SessionHooks(db)
+            _step_turn = await _step_hooks.start_turn(self._trigger_id, teammate_id=teammate_id)
+            _step_turn.turn_type = "task"
+            await db.flush()
+
+        # ── OrganizationState: step start ──
+        if task.run_id:
+            _step_state_key = f"step:{step.id}"
+            from backend.services.organization.state import OrganizationStateService
+            _step_state_svc = OrganizationStateService(db)
+            await _step_state_svc.set_state(
+                task.run_id, "progress", _step_state_key,
+                {"status": "running", "order": step.order, "objective": step.objective[:200]},
+            )
+
         while attempt <= max_attempts:
             logger.info(
                 f"[EXECUTOR] Step {step_id_short} (order={step.order}, "
@@ -363,6 +383,10 @@ class TaskExecutor:
                 trace_id=trace.trace_id,
                 teammate_id=teammate_id,
             )
+
+            if _step_turn and _step_turn.execution_id is None:
+                _step_turn.execution_id = execution.id
+                await db.flush()
 
             # First wait already done in the parallel batch; reuse its result,
             # but on retry we must wait again (serial — fine, retries are rare).
@@ -407,6 +431,15 @@ class TaskExecutor:
                     f"[EXECUTOR] Step {step_id_short} COMPLETED in {duration_ms}ms "
                     f"({len(result_text)} chars, {tot_tok} tokens, ${cost_micro / 1_000_000:.6f})"
                 )
+                if _step_turn:
+                    await _step_hooks.close_turn(_step_turn.id, action=TurnAction.RESPONDED,
+                        tokens_in=inp_tok, tokens_out=out_tok)
+                # ── OrganizationState: step completed ──
+                if task.run_id:
+                    await _step_state_svc.set_state(
+                        task.run_id, "progress", _step_state_key,
+                        {"status": "completed", "duration_ms": duration_ms},
+                    )
                 return
 
             error_msg = runtime_task.error if runtime_task else "ExecutionRuntime timeout"
@@ -438,6 +471,8 @@ class TaskExecutor:
                     replan = await self._trigger_replan(db, task, step, error_msg)
                     handled = await self._apply_replan(db, task, step, replan, trace, events, error_msg)
                     if handled:
+                        if _step_turn:
+                            await _step_hooks.close_turn(_step_turn.id, action=TurnAction.RESPONDED)
                         return
                 logger.warning(
                     f"[EXECUTOR] Step {step_id_short} attempt {attempt} FAILED "
@@ -459,11 +494,33 @@ class TaskExecutor:
             # ── Phase 27: TechLead replan before abort ──
             replan = await self._trigger_replan(db, task, step, error_msg)
             if await self._apply_replan(db, task, step, replan, trace, events, error_msg):
+                if _step_turn:
+                    await _step_hooks.close_turn(_step_turn.id, action=TurnAction.RESPONDED)
                 return
 
             logger.error(f"[EXECUTOR] Step {step_id_short} ABORTED: {error_msg}")
+            if _step_turn:
+                _step_turn.failure = error_msg[:2000]
+                _step_turn.end_time = datetime.now(timezone.utc)
+                await db.flush()
+            # ── OrganizationState: step failed ──
+            if task.run_id:
+                await _step_state_svc.set_state(
+                    task.run_id, "progress", _step_state_key,
+                    {"status": "failed", "error": error_msg[:500]},
+                )
             raise RuntimeError(f"Step {step.id} failed (action={decision.action}): {error_msg}")
 
+        if _step_turn:
+            _step_turn.failure = f"Step {step.id} failed after {max_attempts} attempts"
+            _step_turn.end_time = datetime.now(timezone.utc)
+            await db.flush()
+        # ── OrganizationState: step failed after retries ──
+        if task.run_id and _step_state_key:
+            await _step_state_svc.set_state(
+                task.run_id, "progress", _step_state_key,
+                {"status": "failed", "error": f"Failed after {max_attempts} attempts"},
+            )
         raise RuntimeError(f"Step {step.id} failed after {max_attempts} attempts")
 
     # ── Status Checks ──

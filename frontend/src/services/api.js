@@ -229,3 +229,17 @@ export const claimBoardTask = (id, assigneeId, assigneeName = '') =>
     body: JSON.stringify({ assignee_id: assigneeId, assignee_name: assigneeName }),
   });
 
+// ── Organization Run Monitor (Phase 5.0) ──
+export const getRunStatus = (runId) => request(`/api/organization/runs/${runId}/status`);
+export const getRunTimeline = (runId) => request(`/api/organization/runs/${runId}/timeline`);
+export const getRunSummary = (runId) => request(`/api/organization/runs/${runId}/summary`);
+export const pauseRun = (runId) => request(`/api/organization/runs/${runId}/pause`, { method: 'POST' });
+export const resumeRun = (runId) => request(`/api/organization/runs/${runId}/resume`, { method: 'POST' });
+export const cancelRun = (runId) => request(`/api/organization/runs/${runId}/cancel`, { method: 'POST' });
+
+// ── Phase 8.0: Organization Dashboard ──
+export const getOrganizationSummary = () => request('/api/organization/summary');
+export const getOrgTeammateProfile = (teammateId) => request(`/api/organization/teammates/${teammateId}/profile`);
+export const listOrganizationRuns = (limit = 20, offset = 0) =>
+  request(`/api/organization/runs?limit=${limit}&offset=${offset}`);
+

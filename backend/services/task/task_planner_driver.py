@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Optional
 
-from backend.services.maeos import MAEOS, TaskPriority
+from backend.services.runtime.executor import ExecutionRuntime, TaskPriority
 from backend.services.task.task_planner_schema import TaskPlan, TaskPlannerInput
 from backend.services.task.task_planner_parser import (
     parse_plan,
@@ -94,7 +94,7 @@ def _build_planner_prompt(goal: str, context: dict | None = None) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 async def generate_plan(
-    maeos: MAEOS,
+    maeos: ExecutionRuntime,
     goal: str,
     task_id: str = "",
     context: dict | None = None,
@@ -230,7 +230,7 @@ async def generate_plan(
 
 
 async def generate_plan_sync_wrapper(
-    maeos: MAEOS,
+    maeos: ExecutionRuntime,
     goal: str,
     task_id: str = "",
     context: dict | None = None,

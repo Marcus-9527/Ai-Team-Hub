@@ -22,8 +22,8 @@ from backend.services.dag.core import (
     get_ready_nodes,
     topological_sort,
 )
-from backend.services.planner.dag_executor import (
-    DagExecutor,
+from backend.services.dag.executor import (
+    execute_dag,
     DAGStore,
     get_dag_store,
     reset_dag_store,
@@ -199,7 +199,7 @@ def _dag_store_in_memory():
     reset_dag_store()
     store = DAGStore(db_url="sqlite:///:memory:")
     # Inject into the module-level singleton
-    import backend.services.planner.dag_executor as _de
+    import backend.services.dag.executor as _de
     _de._dag_store = store
     yield
     reset_dag_store()
@@ -231,8 +231,7 @@ class TestDagExecutor:
     async def test_single_node(self, mock_runtime):
         a = _make_node("Task A")
         dag = _make_dag(a)
-        executor = DagExecutor(mock_runtime)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, mock_runtime)
         assert a.status == NodeStatus.COMPLETED
         assert "Result for: Task A" in a.result
 
@@ -242,8 +241,7 @@ class TestDagExecutor:
         a = _make_node("Task A")
         b = _make_node("Task B")
         dag = _make_dag(a, b)
-        executor = DagExecutor(mock_runtime)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, mock_runtime)
         assert a.status == NodeStatus.COMPLETED
         assert b.status == NodeStatus.COMPLETED
 
@@ -254,8 +252,7 @@ class TestDagExecutor:
         b = _make_node("Task B", deps=[a.id])
         c = _make_node("Task C", deps=[b.id])
         dag = _make_dag(a, b, c)
-        executor = DagExecutor(mock_runtime)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, mock_runtime)
         assert a.status == NodeStatus.COMPLETED
         assert b.status == NodeStatus.COMPLETED
         assert c.status == NodeStatus.COMPLETED
@@ -267,8 +264,7 @@ class TestDagExecutor:
         b = _make_node("Task B")
         c = _make_node("Task C", deps=[a.id, b.id])
         dag = _make_dag(a, b, c)
-        executor = DagExecutor(mock_runtime)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, mock_runtime)
         assert a.status == NodeStatus.COMPLETED
         assert b.status == NodeStatus.COMPLETED
         assert c.status == NodeStatus.COMPLETED
@@ -279,8 +275,7 @@ class TestDagExecutor:
         a = _make_node("Task A")
         b = _make_node("Task B", deps=[a.id])
         dag = _make_dag(a, b)
-        executor = DagExecutor(mock_runtime)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, mock_runtime)
         # Verify full state
         d = dag.to_dict()
         nodes = d["nodes"]
@@ -371,7 +366,7 @@ class TestDAGRetry:
         """Node with max_retry=2 succeeds on 3rd attempt."""
         reset_dag_store()
         store = DAGStore(db_url="sqlite:///:memory:")
-        import backend.services.planner.dag_executor as _de
+        import backend.services.dag.executor as _de
         _de._dag_store = store
 
         rt = MagicMock()
@@ -399,8 +394,7 @@ class TestDAGRetry:
 
         node = _make_node("Flaky task", max_retry=2)
         dag = _make_dag(node)
-        executor = DagExecutor(rt)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, rt)
         assert node.status == NodeStatus.COMPLETED
         assert node.retry_count == 2  # 2 retries, 3 total attempts
         assert node.result == "success on attempt 3"
@@ -410,7 +404,7 @@ class TestDAGRetry:
         """Node with max_retry=0 never retries on failure."""
         reset_dag_store()
         store = DAGStore(db_url="sqlite:///:memory:")
-        import backend.services.planner.dag_executor as _de
+        import backend.services.dag.executor as _de
         _de._dag_store = store
 
         rt = MagicMock()
@@ -427,8 +421,7 @@ class TestDAGRetry:
 
         node = _make_node("Fails once", max_retry=0)
         dag = _make_dag(node)
-        executor = DagExecutor(rt)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, rt)
         assert node.status == NodeStatus.FAILED
         assert node.retry_count == 1  # one attempt, no retry
 
@@ -443,7 +436,7 @@ class TestDAGExecutionRelation:
     async def test_execution_id_linked(self):
         reset_dag_store()
         store = DAGStore(db_url="sqlite:///:memory:")
-        import backend.services.planner.dag_executor as _de
+        import backend.services.dag.executor as _de
         _de._dag_store = store
 
         rt = MagicMock()
@@ -464,8 +457,7 @@ class TestDAGExecutionRelation:
         a = _make_node("A")
         b = _make_node("B", deps=[a.id])
         dag = _make_dag(a, b)
-        executor = DagExecutor(rt)
-        await executor.execute_dag(dag)
+        await execute_dag(dag, rt)
 
         # Each node should have a unique execution_id
         assert a.execution_id == "exec_1"

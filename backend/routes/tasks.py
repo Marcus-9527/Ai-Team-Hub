@@ -36,11 +36,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
-from backend.services.runtime.execution_store import SSEBroadcaster
-from backend.services.task.task_orchestrator import TaskOrchestrator, get_task_broadcaster
+from backend.services.runtime.execution_store import SSEBroadcaster, get_sse_broadcaster
 from backend.services.task.task_manager import TaskManager
-from backend.services.task.task_executor import TaskExecutor
-from backend.services.runtime.executor import ExecutionRuntime
 from backend.services.task.task_approval_service import TaskApprovalService
 from backend.services.task.task_policy import TaskPolicyService, RiskLevel
 from backend.services.task.task_plan_service import (
@@ -70,8 +67,6 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 # ── Singleton ──
 
 _manager: Optional[TaskManager] = None
-_executor: Optional[TaskExecutor] = None
-_runtime: Optional[ExecutionRuntime] = None
 
 
 def _get_manager() -> TaskManager:
@@ -79,22 +74,6 @@ def _get_manager() -> TaskManager:
     if _manager is None:
         _manager = TaskManager()
     return _manager
-
-
-def _get_executor() -> TaskExecutor:
-    """Get or create the TaskExecutor singleton."""
-    global _executor
-    if _executor is None:
-        _executor = TaskExecutor()
-    return _executor
-
-
-def _get_runtime() -> ExecutionRuntime:
-    """Get or create the ExecutionRuntime singleton."""
-    global _runtime
-    if _runtime is None:
-        _runtime = ExecutionRuntime(max_workers=4)
-    return _runtime
 
 
 # ── Approval Singleton ──
@@ -361,6 +340,19 @@ async def create_task(req: CreateTaskRequest, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(task)
 
+    # ── OrganizationRun: wrap this task in a TASK run via OrganizationRuntime ──
+    from backend.services.organization.runtime import OrganizationRuntime
+    runtime = OrganizationRuntime(db)
+    org_run = await runtime.start_run(
+        run_type="task",
+        source_id=task.id,
+        workspace_id=task.workspace_id or "",
+        channel_id=task.channel_id or "",
+        title=f"Task: {task.title[:100]}",
+    )
+    task.run_id = org_run.id
+    await db.commit()
+
     # ── Dispatch TASK_CREATED with rich context ──
     try:
         from backend.services.task.task_hooks import (
@@ -399,13 +391,60 @@ async def _background_orchestrate(task_id: str, goal: str) -> None:
         TaskHookContext,
         get_task_hook_registry,
     )
+    from backend.services.session.session_hooks import SessionHooks
+    from backend.models.session import TriggerType
     async with async_session() as db:
+        trigger = None
         try:
-            runtime = _get_runtime()
-            orch = TaskOrchestrator(runtime=runtime)
-            await orch.start_task(db, task_id, goal)
+            mgr = TaskManager()
+            task_obj = await mgr.get_task(db, task_id)
+            ws_id = task_obj.workspace_id if task_obj else ""
+            channel_id = task_obj.channel_id if task_obj else ""
+
+            hooks = SessionHooks(db)
+            trigger = await hooks.open_trigger(
+                channel_id=channel_id or "",
+                user_msg_id="",
+                workspace_id=ws_id or "",
+                trigger_type=TriggerType.TASK,
+                task_id=task_id,
+            )
+            # Link trigger to the same OrganizationRun as the task
+            task_obj_with_run = await mgr.get_task(db, task_id)
+            if task_obj_with_run and task_obj_with_run.run_id:
+                trigger.run_id = task_obj_with_run.run_id
+                # Emit run.created event on the linked trigger
+                rt = OrganizationRuntime(db)
+                await rt.emit_run_event(trigger.id, "run.created", task_obj_with_run.run_id)
             await db.commit()
+
+            # Route through OrganizationRuntime → OrganizationLoop → DELEGATE
+            rt = OrganizationRuntime(db)
+            await rt.dispatch_delegate(
+                trigger_id=trigger.id,
+                run_id=task_obj_with_run.run_id if task_obj_with_run else "",
+                task_id=task_id,
+                goal=goal,
+            )
+            await db.commit()
+
+            task_obj = await mgr.get_task(db, task_id)
+            status = "completed" if task_obj and task_obj.status == "COMPLETED" else "failed"
+            await hooks.close_trigger(trigger.id, status=status)
+            await db.commit()
+            # ── Close Task OrganizationRun ──
+            if task_obj and task_obj.run_id:
+                rt = OrganizationRuntime(db)
+                await rt.finish_run(task_obj.run_id, status="completed" if status == "completed" else "failed", trigger_id=trigger.id)
+                await db.commit()
             logger.info("[BG-ORCH] Task %s completed via background orchestration", task_id[:8])
+
+            # ── SessionEvent → Organization Memory ──
+            try:
+                from backend.services.memory.event_processor import get_event_processor
+                await get_event_processor().process_trigger(db, trigger.id)
+            except Exception as me:
+                logger.warning("[BG-ORCH] memory processing failed (non-fatal): %s", me)
         except Exception as e:
             logger.warning("[BG-ORCH] Background orchestration for %s failed: %s", task_id[:8], e)
             try:
@@ -417,6 +456,27 @@ async def _background_orchestrate(task_id: str, goal: str) -> None:
                     await db.commit()
             except Exception:
                 pass
+            if trigger:
+                try:
+                    await hooks.close_trigger(trigger.id, status="failed")
+                    await db.commit()
+                except Exception:
+                    pass
+                try:
+                    # ── Close Task OrganizationRun on failure ──
+                    mgr2 = TaskManager()
+                    failed_task = await mgr2.get_task(db, task_id)
+                    if failed_task and failed_task.run_id:
+                        rt = OrganizationRuntime(db)
+                        await rt.finish_run(failed_task.run_id, status="failed", trigger_id=trigger.id)
+                        await db.commit()
+                except Exception:
+                    pass
+                try:
+                    from backend.services.memory.event_processor import get_event_processor
+                    await get_event_processor().process_trigger(db, trigger.id)
+                except Exception as me:
+                    logger.warning("[BG-ORCH] memory processing failed on fail path: %s", me)
 
         # ── Dispatch completion hooks (Memory → Brain → Channel Notify) ──
         # ponytail: one dispatch here covers the whole background path; no
@@ -564,7 +624,7 @@ async def plan_task(task_id: str, db: AsyncSession = Depends(get_db)):
     # 3. If PlanningEngine failed, build minimal DAG from keyword analysis
     if dag is None or not dag.nodes:
         from backend.services.planner.task_analyzer import TaskAnalyzer
-        from backend.services.planner.dag_builder import DAGBuilder
+        from backend.services.dag.builder import DAGBuilder
         from backend.services.task.task_planner_schema import TaskPlan, TaskStepProposal
 
         analyzer = TaskAnalyzer()
@@ -688,17 +748,11 @@ async def execute_task(task_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(task)
     
-    # Now execute all steps through MAEOS
+    # Now execute all steps through OrganizationLoop → EXECUTE action
     try:
-        # Get ExecutionRuntime
-        runtime = _get_runtime()
-        
-        # Get executor and wire runtime
-        executor = _get_executor()
-        executor.set_runtime(runtime)
-        
-        # Execute the task (runs all pending steps)
-        task = await executor.execute_task(db, task)
+        from backend.services.organization.runtime import OrganizationRuntime
+        rt = OrganizationRuntime(db)
+        await rt.dispatch_execute(db_session=db, task=task)
         await db.commit()
         await db.refresh(task)
 
@@ -987,8 +1041,9 @@ async def get_task_progress(
     db: AsyncSession = Depends(get_db),
 ):
     """Get execution progress for a task."""
-    executor = _get_executor()
-    progress = await executor.get_task_progress(db, task_id)
+    from backend.services.organization.runtime import OrganizationRuntime
+    rt = OrganizationRuntime(db)
+    progress = await rt.get_task_progress(task_id)
     if not progress["steps"]:
         # Check task exists
         mgr = _get_manager()
@@ -1244,7 +1299,7 @@ async def stream_task_events(task_id: str):
     Events: planning_started, team_created, dag_created,
             execution_started, execution_completed.
     """
-    broadcaster = get_task_broadcaster()
+    broadcaster = get_sse_broadcaster()
     sub = broadcaster.subscribe(f"task:{task_id}")
 
     async def event_stream():
@@ -1485,12 +1540,11 @@ async def apply_task_plan(
     await db.commit()
     await db.refresh(task)
 
-    # Step 3: Execute through ExecutionRuntime
-    executor = _get_executor()
+    # Step 3: Execute through OrganizationLoop → EXECUTE action
     try:
-        runtime = _get_runtime()
-        executor.set_runtime(runtime)
-        task = await executor.execute_task(db, task)
+        from backend.services.organization.runtime import OrganizationRuntime
+        rt = OrganizationRuntime(db)
+        await rt.dispatch_execute(db_session=db, task=task)
         await db.commit()
         await db.refresh(task)
     except RuntimeError as e:
@@ -1684,32 +1738,8 @@ async def list_task_insights(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """List MemoryInsights for a task."""
-    mgr = _get_manager()
-    task = await mgr.get_task(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    from backend.services.memory.memory_intelligence import (
-        get_intelligence_service,
-    )
-
-    svc = get_intelligence_service()
-    insights = await svc.list_insights(task_id=task_id, limit=limit, offset=offset)
-
-    return [
-        InsightResponse(
-            id=ins.id,
-            type=ins.type,
-            title=ins.title,
-            content=ins.content,
-            source_task_id=ins.source_task_id,
-            confidence=ins.confidence,
-            created_at=ins.created_at.isoformat() if ins.created_at else None,
-            metadata=dict(ins.metadata),
-        )
-        for ins in insights
-    ]
+    """List MemoryInsights for a task. Returns empty — Insight Intelligence layer removed."""
+    return []
 
 
 # ═══════════════════════════════════════════════════════════════

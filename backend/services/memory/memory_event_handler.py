@@ -247,9 +247,6 @@ class MemoryTaskHook(TaskHook):
         )
         await self._store(summary, "POST_TASK_SUMMARY")
 
-        # ── V2.7 Phase C: Trigger insight generation (fire-and-forget) ──
-        asyncio.ensure_future(self._trigger_intelligence(ctx.task_id))
-
     # ── TASK_FAILED ──────────────────────────────────────────────
 
     async def on_task_failed(self, ctx: TaskHookContext) -> None:
@@ -279,9 +276,6 @@ class MemoryTaskHook(TaskHook):
             },
         )
         await self._store(item, "TASK_FAILED")
-
-        # ── V2.7 Phase C: Trigger insight generation (fire-and-forget) ──
-        asyncio.ensure_future(self._trigger_intelligence(ctx.task_id))
 
     # ── STEP_COMPLETED ───────────────────────────────────────────
 
@@ -440,27 +434,3 @@ class MemoryTaskHook(TaskHook):
             item.embedding = MemoryService.compute_embedding(item.content)
         await self._buffer.add(item)
         logger.debug(f"[MEMORY-EVENT] {event_label} → buffered {item.id}")
-
-    # ── V2.7 Phase C: Intelligence trigger ──
-
-    async def _trigger_intelligence(self, task_id: str) -> None:
-        """
-        Fire-and-forget: analyze task execution results and generate insights.
-
-        Runs in its own DB session so it never interferes with the
-        request/event session that triggered the hook.
-        """
-        try:
-            from backend.database import async_session
-            from backend.services.memory.memory_intelligence import (
-                get_intelligence_service,
-            )
-
-            async with async_session() as db:
-                svc = get_intelligence_service()
-                await svc.process_task_completion(db, task_id)
-                await db.commit()
-        except Exception as e:
-            logger.debug(
-                f"[MEMORY-EVENT] Intelligence trigger failed (non-fatal): {e}"
-            )

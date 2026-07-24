@@ -142,13 +142,30 @@ class TeammateStateManager:
 
     async def set_state(
         self, teammate_id: str, new_state: TeammateState, task_id: str = "",
+        *,
+        db=None, run_id: Optional[str] = None,
     ) -> dict:
-        """Transition state and persist record to memory."""
+        """Transition state and persist record to memory.
+
+        If *db* and *run_id* are provided, also dual-write to
+        OrganizationState (member type) for DB-backed persistence.
+        """
         async with self._lock:
             st = await self.get_or_create(teammate_id)
             record = st.set_state(new_state, task_id)
         # Fire-and-forget memory persistence
         asyncio.ensure_future(self._persist_transition(record))
+        # Dual-write to OrganizationState if DB available
+        if db is not None and run_id is not None:
+            try:
+                from backend.services.organization.state import OrganizationStateService
+                svc = OrganizationStateService(db)
+                await svc.set_state(
+                    run_id, "member", teammate_id,
+                    {"state": new_state.value, "task_id": task_id},
+                )
+            except Exception as e:
+                logger.warning("[TEAMMATE-STATE] OrganizationState dual-write failed: %s", e)
         return record
 
     async def set_working(self, teammate_id: str, task_id: str) -> dict:

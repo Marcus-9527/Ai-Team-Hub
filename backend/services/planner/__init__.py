@@ -1,17 +1,15 @@
-"""Planner — DAG execution runtime + Phase 11 LLM Planner System."""
+"""Planner — Phase 11 LLM Planner System.
 
-from backend.services.planner.dag_executor import (
-    DAGStore,
-    DagExecutor,
-    get_dag_store,
-    reset_dag_store,
+Re-exports DAG modules from services/dag/ for backward compatibility.
+New code should import from services.dag directly.
+"""
+
+from backend.services.dag.builder import (
+    DAGBuilder,
 )
 from backend.services.planner.task_analyzer import (
     TaskAnalyzer,
     TaskAnalysis,
-)
-from backend.services.planner.dag_builder import (
-    DAGBuilder,
 )
 from backend.services.planner.dag_validator import (
     DAGValidator,
@@ -23,9 +21,8 @@ from backend.services.planner.planning_engine import (
 )
 
 __all__ = [
-    "DAGStore", "DagExecutor", "get_dag_store", "reset_dag_store",
-    "TaskAnalyzer", "TaskAnalysis",
     "DAGBuilder",
+    "TaskAnalyzer", "TaskAnalysis",
     "DAGValidator", "ValidationResult",
     "PlanningEngine", "PlanningError",
 ]

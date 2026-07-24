@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Hash, Settings, MessageSquare, ListTodo, Users, Zap, X, LogOut } from 'lucide-react';
+import { Plus, Hash, Settings, MessageSquare, ListTodo, Users, Zap, Activity, X, LogOut, UserCheck } from 'lucide-react';
 import { clearSession } from '../../services/auth';
 import * as api from '../../services/api';
 import { useTranslation } from '../../i18n';
@@ -9,8 +9,10 @@ import ConfirmDialog from '../ConfirmDialog';
 
 const NAV_ITEMS = [
   { view: 'tasks',     icon: ListTodo,     label: '任务' },
-  { view: 'team',      icon: Users,        label: '团队' },
-  { view: 'ai-ops',    icon: Zap,          label: '自动化' },
+  { view: 'org-dashboard', icon: Users,  label: 'AI 团队' },
+  { view: 'team',      icon: UserCheck,   label: '队友管理' },
+  { view: 'ai-ops',    icon: Zap,         label: '自动化' },
+  { view: 'org-run',   icon: Activity,    label: '运行监控' },
 ];
 
 export default function Sidebar({

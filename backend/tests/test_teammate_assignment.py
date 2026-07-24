@@ -18,7 +18,7 @@ import pytest
 
 from backend.models import Teammate, gen_uuid
 from backend.services.dag.core import DAGDefinition, DAGNode, NodeStatus
-from backend.services.planner.dag_executor import DagExecutor, DAGStore, reset_dag_store
+from backend.services.dag.executor import execute_dag, DAGStore, reset_dag_store
 from backend.services.teammate_intelligence import TeammateSelector, TeammateProfile
 
 
@@ -116,7 +116,7 @@ class TestRecommendBySkills:
 def _store_in_memory():
     reset_dag_store()
     store = DAGStore(db_url="sqlite:///:memory:")
-    import backend.services.planner.dag_executor as _de
+    import backend.services.dag.executor as _de
     _de._dag_store = store
     yield
     reset_dag_store()
@@ -166,8 +166,7 @@ class TestDagAutoAssignment:
             node = DAGNode(description="Build API", required_skills=["python", "coding"])
             dag = DAGDefinition(name="test-dag")
             dag.add_node(node)
-            executor = DagExecutor(mock_runtime)
-            await executor.execute_dag(dag)
+            await execute_dag(dag, mock_runtime)
 
         assert node.teammate == "AutoBot"
         assert node.selected_teammate_id == t.id
@@ -184,8 +183,7 @@ class TestDagAutoAssignment:
 
         assign_spy = AsyncMock()
         with patch.object(TeammateSelector, "recommend_by_skills", assign_spy):
-            executor = DagExecutor(mock_runtime)
-            await executor.execute_dag(dag)
+            await execute_dag(dag, mock_runtime)
 
         assert node.teammate == "PreExistingBot"
         assign_spy.assert_not_called()
@@ -200,8 +198,7 @@ class TestDagAutoAssignment:
 
         assign_spy = AsyncMock()
         with patch.object(TeammateSelector, "recommend_by_skills", assign_spy):
-            executor = DagExecutor(mock_runtime)
-            await executor.execute_dag(dag)
+            await execute_dag(dag, mock_runtime)
 
         assert node.teammate == ""
         assert node.selected_teammate_id == ""
@@ -214,9 +211,8 @@ class TestDagAutoAssignment:
         node = DAGNode(description="Lonely node", required_skills=["python"])
         dag = DAGDefinition(name="test-dag")
         dag.add_node(node)
-        executor = DagExecutor(mock_runtime)
         with patch.object(TeammateSelector, "recommend_by_skills", AsyncMock(return_value=[])):
-            await executor.execute_dag(dag)
+            await execute_dag(dag, mock_runtime)
 
         # teammate stays empty (no teammates found)
         assert node.teammate == ""
@@ -320,7 +316,7 @@ class TestDagDuplicateAssignment:
         dag.add_node(node_a)
         dag.add_node(node_b)
 
-        from backend.services.planner.dag_executor import DagExecutor
+        from backend.services.dag.executor import execute_dag
         from backend.services.runtime.executor import ExecutionRuntime
         rt = AsyncMock(spec=ExecutionRuntime)
         rt.execute = AsyncMock(return_value=MagicMock(
@@ -332,8 +328,7 @@ class TestDagDuplicateAssignment:
             return await orig(rs, top_n=top_n, db=db_session, **kwargs)
 
         with patch.object(TeammateSelector, "recommend_by_skills", side_effect=patched):
-            executor = DagExecutor(rt)
-            await executor.execute_dag(dag)
+            await execute_dag(dag, rt)
 
         assert node_a.teammate, "node_a should have a teammate"
         assert node_b.teammate, "node_b should have a teammate"
@@ -360,7 +355,7 @@ class TestDagDuplicateAssignment:
         dag.add_node(node_a)
         dag.add_node(node_b)
 
-        from backend.services.planner.dag_executor import DagExecutor
+        from backend.services.dag.executor import execute_dag
         from backend.services.runtime.executor import ExecutionRuntime
         rt = AsyncMock(spec=ExecutionRuntime)
         rt.execute = AsyncMock(return_value=MagicMock(
@@ -372,8 +367,7 @@ class TestDagDuplicateAssignment:
             return await orig(rs, top_n=top_n, db=db_session, **kwargs)
 
         with patch.object(TeammateSelector, "recommend_by_skills", side_effect=patched):
-            executor = DagExecutor(rt)
-            await executor.execute_dag(dag)
+            await execute_dag(dag, rt)
 
         # First node gets SoloBot; second has no available teammate
         assert node_a.teammate == "SoloBot"

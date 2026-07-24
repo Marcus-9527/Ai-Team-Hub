@@ -29,19 +29,31 @@ async def _extract_summary(user_message: str, reply_text: str, api_key: str,
                            base_url: str | None, provider: str, model: str) -> str | None:
     """返回压缩摘要，或 None（无可记内容 / 失败）。"""
     try:
-        from backend.services.ai_service import stream_ai_response
+        from backend.services.runtime.agent_loop import AgentLoop as _AgentLoop
+        from backend.services.runtime.llm_client_and_tools import (
+            create_streaming_llm_client as _create_streaming, ToolExecutorAdapter as _ToolExec,
+        )
+
         conversation = f"用户：{user_message}\n队友：{reply_text}"
         chunks: list[str] = []
-        async for chunk in stream_ai_response(
+
+        async def _collect(text: str):
+            chunks.append(text)
+
+        streaming_client = _create_streaming(
+            api_key=api_key, model=model,
+            provider=provider, base_url=base_url or "",
+            max_tokens=_MAX_TOKENS,
+        )
+        loop = _AgentLoop(llm_client=streaming_client, tool_executor=_ToolExec(), max_turns=1)
+        await loop.run(
             system_prompt=_EXTRACT_PROMPT,
             messages=[{"role": "user", "content": conversation}],
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url or None,
-            max_tokens=_MAX_TOKENS,
-        ):
-            chunks.append(chunk)
+            tools=[],
+            workspace_id="",
+            subject="chat_memory",
+            on_text_chunk=_collect,
+        )
         text = "".join(chunks).strip()
         if not text or text.upper() == "[NONE]":
             return None
@@ -64,7 +76,6 @@ async def _do_store(teammate: dict, user_message: str, reply_text: str,
             BrainFragmentType,
         )
         from backend.services.runtime.teammate_runner import resolve_api_key
-        from backend.services.ai_service import stream_ai_response
 
         api_key, base_url, provider, fallback_model = await resolve_api_key(teammate)
         if not api_key:

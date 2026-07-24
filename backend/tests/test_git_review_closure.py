@@ -58,7 +58,7 @@ def test_git_workspace_flow_creates_real_diff():
 
 def test_reviewer_rejects_on_failing_tests(monkeypatch):
     """Reviewer runs pytest; if tests fail it must reject (mechanics path)."""
-    import backend.services.runtime.reviewer as reviewer
+    import backend.services.ai_service as ai_service
 
     # Stub the LLM to return a JSON reject with a blocker.
     async def fake_stream(**kwargs):
@@ -68,7 +68,7 @@ def test_reviewer_rejects_on_failing_tests(monkeypatch):
             "blockers": ["pytest failed"],
         })
 
-    monkeypatch.setattr(reviewer, "stream_ai_response", fake_stream)
+    monkeypatch.setattr(ai_service, "stream_ai_response", fake_stream)
 
     tr.git_ensure(WS, branch=f"feat/{WS}")
     with open(os.path.join(tr.workspace_root(WS), "x.py"), "w") as f:
@@ -88,7 +88,7 @@ def test_reviewer_rejects_on_failing_tests(monkeypatch):
 
 def test_reviewer_approves_on_clean_diff(monkeypatch):
     """Reviewer approves when the model says approve (identity loaded, no second chain)."""
-    import backend.services.runtime.reviewer as reviewer
+    import backend.services.ai_service as ai_service
 
     async def fake_stream(**kwargs):
         # Confirm the reviewer prompt carries the teammate identity + real diff.
@@ -97,7 +97,7 @@ def test_reviewer_approves_on_clean_diff(monkeypatch):
         assert "sys_prompt_for_reviewer" in kwargs["system_prompt"]
         yield json.dumps({"verdict": "approve", "summary": "lgtm", "blockers": []})
 
-    monkeypatch.setattr(reviewer, "stream_ai_response", fake_stream)
+    monkeypatch.setattr(ai_service, "stream_ai_response", fake_stream)
 
     tr.git_ensure(WS, branch=f"feat/{WS}")
     with open(os.path.join(tr.workspace_root(WS), "y.py"), "w") as f:

@@ -29,8 +29,6 @@ async def demo_init():
     from backend.models import Teammate, Channel
     from sqlalchemy import select
     from backend.services.task.task_manager import TaskManager
-    from backend.services.task.task_orchestrator import TaskOrchestrator
-    from backend.services.runtime.executor import ExecutionRuntime
 
     created = {"teammates": [], "channel": None, "task": None}
 
@@ -87,12 +85,13 @@ async def demo_init():
         )
         await db.commit()
 
-        # Background: orchestrate the demo task
-        runtime = ExecutionRuntime(max_workers=2)
-        orch = TaskOrchestrator(runtime=runtime)
-        asyncio.create_task(orch.start_task(
-            db, demo_task.id,
-            "分析用户增长趋势：找出增长驱动因素，提出产品优化建议"
+        # Background: orchestrate the demo task through OrganizationRuntime
+        from backend.services.organization.runtime import OrganizationRuntime
+        rt = OrganizationRuntime(db)
+        asyncio.create_task(rt.run_task(
+            task_id=demo_task.id,
+            goal="分析用户增长趋势：找出增长驱动因素，提出产品优化建议",
+            channel_id=demo_ch.id,
         ))
 
         created["task"] = {

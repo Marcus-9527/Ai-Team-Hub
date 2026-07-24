@@ -177,9 +177,9 @@ Based on the context above, provide a helpful answer. If the context doesn't con
 
     # Step 4: Execute via Team Engine
     try:
-        from backend.routes.maeos import _get_maeos
-        maeos = await _get_maeos()
-        task_id = await maeos.submit(
+        from backend.routes.maeos import get_runtime
+        runtime = get_runtime()
+        task_id = await runtime.submit(
             description=full_prompt,
             priority=2,
             wait=True,

@@ -20,6 +20,8 @@ const AutonomousCenter = lazy(() => import('./components/Autonomous/AIOpsCenter'
 const ExecutionRoom = lazy(() => import('./components/Execution/ExecutionRoom'));
 const WorkspaceExplorer = lazy(() => import('./components/Workspace/WorkspaceExplorer'));
 const SystemHealthView = lazy(() => import('./components/SystemHealth/SystemHealth'));
+const OrganizationRunView = lazy(() => import('./pages/OrganizationRunView'));
+const OrganizationDashboard = lazy(() => import('./components/Dashboard/OrganizationDashboard'));
 
 
 function ViewFallback() {
@@ -31,6 +33,7 @@ export default function AppShell({ onNavigateToLanding }) {
   const [channelId, setChannelId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [orgRunId, setOrgRunId] = useState('');
 
   const triggerRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
@@ -130,6 +133,14 @@ export default function AppShell({ onNavigateToLanding }) {
     viewKey = 'system-health-' + refreshKey;
     ViewComponent = SystemHealthView;
     viewProps = {};
+  } else if (view === 'org-run') {
+    viewKey = 'org-run-' + refreshKey;
+    ViewComponent = OrganizationRunView;
+    viewProps = { initialRunId: orgRunId };
+  } else if (view === 'org-dashboard') {
+    viewKey = 'org-dashboard-' + refreshKey;
+    ViewComponent = OrganizationDashboard;
+    viewProps = { onNavigate: handleNavigate };
   } else {
     viewKey = 'tasks-' + refreshKey;
     ViewComponent = TaskModeView;

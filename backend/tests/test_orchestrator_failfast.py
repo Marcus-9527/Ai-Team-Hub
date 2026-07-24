@@ -65,7 +65,7 @@ async def test_happy_path_real_runtime(db_session):
         "system_prompt": "You are the TechLead. Decompose the goal.",
     }
 
-    with patch("backend.services.pipeline.stream_ai_response", _fake_stream), \
+    with patch("backend.services.ai_service.stream_ai_response", _fake_stream), \
          patch("backend.services.runtime.executor._load_teammate",
                new=AsyncMock(return_value=tm_dict)), \
          patch("backend.services.runtime.executor.resolve_api_key",

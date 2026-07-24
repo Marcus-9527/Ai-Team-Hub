@@ -559,9 +559,6 @@ class DBExecutionStore:
                 session.commit()
         except Exception as e:
             logger.warning("[DBStore] _do_sync failed: %s", e)
-            asyncio.get_running_loop().run_in_executor(None, _work)
-        except RuntimeError:
-            _work()  # no running loop (e.g. sync test) — run inline
 
     def get(self, execution_id: str) -> Optional[ExecutionRecord]:
         """Get execution record with events (async-friendly: runs in thread)."""

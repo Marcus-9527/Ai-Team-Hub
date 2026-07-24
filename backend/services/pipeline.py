@@ -13,7 +13,6 @@ import re
 import json
 from typing import Optional
 
-from backend.services.ai_service import stream_ai_response
 from backend.services.orchestrator_prompts import SYSTEM_PROMPT, PLANNER_PROMPT, REVIEWER_PROMPT
 
 logger = logging.getLogger("pipeline")
@@ -51,18 +50,30 @@ async def _call_llm(
     base_url: str = None,
     max_tokens: int = 4096,
 ) -> str:
-    """Call LLM and collect all streamed chunks into a single string."""
-    chunks = []
-    async for chunk in stream_ai_response(
+    """Call LLM via AgentLoop and collect all streamed chunks into a single string."""
+    from backend.services.runtime.agent_loop import AgentLoop as _AgentLoop
+    from backend.services.runtime.llm_client_and_tools import (
+        create_streaming_llm_client as _create_streaming, ToolExecutorAdapter as _ToolExec,
+    )
+
+    chunks: list[str] = []
+    async def _collect(text: str):
+        chunks.append(text)
+
+    streaming_client = _create_streaming(
+        api_key=api_key, model=model,
+        provider=provider, base_url=base_url or "",
+        max_tokens=max_tokens,
+    )
+    loop = _AgentLoop(llm_client=streaming_client, tool_executor=_ToolExec(), max_turns=1)
+    await loop.run(
         system_prompt=system_prompt,
         messages=[{"role": "user", "content": user_message}],
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        max_tokens=max_tokens,
-    ):
-        chunks.append(chunk)
+        tools=[],
+        workspace_id="",
+        subject="pipeline",
+        on_text_chunk=_collect,
+    )
     return "".join(chunks)
 
 

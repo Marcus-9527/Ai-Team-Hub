@@ -208,7 +208,7 @@ class MemoryContext:
             return ""
 
         compressor = MemoryCompressor(max_chars=1200)
-        from backend.services.memory.memory_ranker import RankedItem
+        from backend.services.memory.memory_retriever import RankedItem
 
         ranked = [RankedItem(item=i, score=1.0) for i in items]
         compressed = compressor.compress(ranked)

@@ -5,8 +5,9 @@ from backend.middleware.auth import require_admin
 from pydantic import BaseModel
 
 from backend.services.dag.core import DAGDefinition, DAGNode, detect_cycle, topological_sort
-from backend.services.planner.dag_executor import get_dag_store, DagExecutor
-from backend.routes.maeos import _maeos as _global_maeos
+from backend.services.dag.executor import get_dag_store, execute_dag
+from backend.services.runtime.executor import ExecutionRuntime
+from backend.routes.maeos import get_runtime
 
 router = APIRouter(prefix="/api/dags", tags=["dags"])
 
@@ -54,38 +55,33 @@ async def create_dag(req: CreateDAGRequest):
         raise HTTPException(400, "DAG contains a cycle")
 
     topo = topological_sort(dag)
-    get_dag_store().save(dag)
+    await get_dag_store().save(dag)
     return {"dag": dag.to_dict(), "topological_order": topo}
 
 
 @router.get("")
 async def list_dags():
     store = get_dag_store()
-    return {"dags": [d.to_dict() for d in store.list()]}
+    return {"dags": [d.to_dict() for d in await store.list()]}
 
 
 @router.get("/{dag_id}")
 async def get_dag(dag_id: str):
     store = get_dag_store()
-    dag = store.get(dag_id)
+    dag = await store.get(dag_id)
     if not dag:
         raise HTTPException(404, "DAG not found")
     return dag.to_dict()
 
-
 @router.post("/{dag_id}/execute")
-async def execute_dag(dag_id: str):
+async def execute_dag_route(dag_id: str, runtime: ExecutionRuntime = Depends(get_runtime)):
     store = get_dag_store()
-    dag = store.get(dag_id)
+    dag = await store.get(dag_id)
     if not dag:
         raise HTTPException(404, "DAG not found")
 
-    if _global_maeos is None:
-        raise HTTPException(503, "Team Engine not initialized")
-
-    executor = DagExecutor(_global_maeos._runtime)
     try:
-        await executor.execute_dag(dag)
+        dag = await execute_dag(dag, runtime)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

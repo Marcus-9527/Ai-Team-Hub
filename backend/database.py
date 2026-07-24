@@ -58,7 +58,9 @@ async def init_db():
     from backend.models import PolicyDecisionModel  # noqa: F401
     from backend.models import TeammateTemplate  # noqa: F401
     from backend.models import BoardTask  # noqa: F401
+    from backend.models import SessionTrigger, SessionTurn  # noqa: F401
     from backend.models import User, Workspace, WorkspaceMember  # noqa: F401
+    from backend.models import OrganizationRun  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if _is_sqlite:
@@ -109,6 +111,7 @@ async def _migrate_columns() -> None:
             ("dependency", "JSON", "[]"),
             ("techlead_summary", "TEXT", ""),
             ("techlead_decision", "JSON", None),
+            ("run_id", "VARCHAR", None),
         ],
         "task_steps": [
             ("deps", "JSON", "[]"),
@@ -125,6 +128,19 @@ async def _migrate_columns() -> None:
             ("assignee_name", "VARCHAR", None),
             ("created_by", "VARCHAR", "system"),
             ("completed_at", "DATETIME", None),
+        ],
+        "session_triggers": [
+            ("task_id", "VARCHAR", None),
+            ("teammate_id", "VARCHAR", None),
+            ("run_id", "VARCHAR", None),
+            ("status", "VARCHAR", "active"),
+            ("ended_at", "DATETIME", None),
+        ],
+        "session_turns": [
+            ("turn_type", "VARCHAR", None),
+            ("execution_id", "VARCHAR", None),
+            ("failure", "TEXT", None),
+            ("metadata_json", "JSON", None),
         ],
     }
 

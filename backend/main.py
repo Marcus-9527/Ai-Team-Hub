@@ -21,7 +21,7 @@ from backend.router_registry import register_routers
 from backend.static_serving import mount_frontend
 from backend.startup import (
     init_encryption, migrate_legacy_keys, register_task_hooks,
-    register_event_subscribers, BackgroundTaskManager,
+    register_event_subscribers, ensure_default_data, BackgroundTaskManager,
 )
 from backend.services.tool_gateway import init_tool_gateway
 from backend.services.model_sync import sync_models, CACHE_TTL
@@ -50,30 +50,29 @@ async def lifespan(app: FastAPI):
     init_tool_gateway()
 
     # ── Team Execution Engine ──
-    from backend.routes.maeos import init_maeos
-    init_maeos(max_workers=4)
+    from backend.routes.maeos import init_runtime
+    init_runtime(max_workers=4)
 
     register_task_hooks()
     register_event_subscribers()
     ensure_api_key()
+    await ensure_default_data()
 
     # ── Model auto-sync + automation poll loops ──
     task_manager.spawn(sync_models(), "startup_model_sync")
     task_manager.spawn(_periodic_model_sync(), "periodic_model_sync")
-    from backend.routes.automation import automation_poll_loop
     from backend.routes.automation_v2 import automation_v2_poll_loop, reap_orphaned_runs, automation_orphan_reaper_loop
     # Reclaim runs that died with the previous process (fire-and-forget create_task).
     await reap_orphaned_runs()
     task_manager.spawn(automation_orphan_reaper_loop(interval=300), "automation_orphan_reaper")
-    task_manager.spawn(automation_poll_loop(interval=30), "automation_poll")
     task_manager.spawn(automation_v2_poll_loop(interval=60), "automation_v2_poll")
 
     yield
 
     await task_manager.shutdown()
-    from backend.routes.maeos import _maeos
-    if _maeos:
-        await _maeos.shutdown(wait=True)
+    from backend.routes.maeos import _runtime
+    if _runtime:
+        await _runtime.shutdown(wait=True)
 
 
 app = FastAPI(
